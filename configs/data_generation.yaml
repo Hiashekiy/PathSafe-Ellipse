@@ -1,0 +1,92 @@
+# PathSafe-Ellipse :: data generation config
+# 所有物理量单位显式标注：[cells] 栅格 / [m] 米。
+# 约定：map_patch 局部坐标 = 图像坐标（栅格中心位于整数坐标），路径点恒在 (64, 64)。
+# 坐标一律为 (x, y) = (col, row)。
+
+project:
+  name: PathSafe-Ellipse
+  random_seed: 42
+
+paths:
+  map_dir: ./data/street-map
+  processed_dir: ./data/processed
+  intermediate_dir: ./data/intermediate
+  labels_dir: ./data/labels
+  splits_dir: ./data/splits
+  reports_dir: ./reports
+  outputs_dir: ./outputs
+  logs_dir: ./logs
+
+map:
+  resolution: 0.25          # [m/cell]
+  default_type: octile
+  obstacle_chars: ["@", "O", "T", "W"]
+
+robot:
+  radius: 0.25              # [m]
+  # r_cell = radius / resolution = 1.0
+  inflation_kernel: 1       # 3x3 方形结构元素（半径 1）
+  inflation_iterations: 1   # 只膨胀一次，后续全部复用 occupancy_inflated
+
+path_search:
+  paths_per_map: 30         # 每张地图目标有效路径数（文档初始值 100；全量 180 图按算力预算取 30）
+  max_path_attempts: 400    # 每张地图最大起终点尝试次数
+  min_start_goal_distance: 32   # [cells] = 8 m
+  min_path_length: 40           # [cells] = 10 m
+  max_start_goal_overlap_reuse: 8   # 拒绝与该地图已有路径起终点过于接近的对（cells）
+  boundary_margin: 8            # [cells] 起终点远离地图外边界填充区
+
+path_sampling:
+  spacing: 4                # [cells] = 1.0 m 弧长采样间距
+  corner_angle_threshold_deg: 30.0
+  corner_spacing_min: 4     # [cells] 转弯点去重最小间距
+  dedupe_distance: 2        # [cells] 近重复样本去重
+  include_endpoints: true
+
+local_features:
+  patch_size: 128
+  ray_count: 16
+  ray_max_range: 64         # [cells] = 16 m
+
+candidate_centers:
+  offset_ratios: [0.25, 0.5, 0.75]
+  ray_margin: 0.75          # [cells] 沿射线扣除的安全余量 d_safe = max(0, d - margin)
+  dedupe_distance: 1.0      # [cells]
+  min_center_clearance: 1.0 # [cells] 候选中心到最近障碍栅格的最小净空（贴墙场景需放宽）
+  segment_clearance: 0.4    # [cells] 线段 supercover 途经栅格要求的最小净空
+
+ellipse_solver:
+  max_iters: 14                 # 先切面后求解：每轮 1 轮切面 + 1 次 MVIE
+  angle_bins: 32                # 已不用于切面选择（保留配置兼容），切面直接针对被违反的栅格
+  convergence_volume_change: 0.05
+  min_eigenvalue: 1.0e-3        # 半轴数值下限 [cells]
+  solver_primary: CLARABEL      # 参考求解器（barrier 非最优时取两者较优解）
+  solver_backup: SCS
+  backend: barrier              # barrier = 快速内点求解（生产）；cvxpy = CLARABEL
+  separator: exact             # 分离面穿过障碍栅格最近点（精确支撑面）；midpoint 会系统性偏小约 25%
+  max_cut_rounds: 12            # 累积切面轮数上限
+  max_cuts_per_round: 32        # 每轮只切最紧的若干个被违反栅格
+  init_radius_scale: 0.5
+  boundary_point_mode: exact_cells  # 用障碍栅格方形的最近点构造精确支撑半平面（不再膨胀）
+
+label:
+  point_inside_eta: 0.90
+  offset_penalty_mu: 0.05
+  min_semi_axis: 0.5        # [m] 短半轴下限（唯一固定验收阈值，不做尺度自适应）
+  max_semi_axis: 16.0       # [m] 长半轴上限（= ray_max_range * resolution）
+  angle_axis_ratio_for_valid: 1.02   # a/b < 该值视为近圆，angle_valid = 0
+  safety_epsilon: 1.0e-9    # 严格椭圆/栅格相交判定的安全余量（<1 才判定相交）
+
+dataset:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  split_strategy: map_group   # map_group | path_group
+  split_seed: 42
+  exclude_patch_border: 0     # 允许 patch 越界填充（文档要求越界视为障碍）
+
+runtime:
+  num_workers: 14
+  points_per_task: 24
+  solver_time_budget_s: 2.0
+  log_level: INFO

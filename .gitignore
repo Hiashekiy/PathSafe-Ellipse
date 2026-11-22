@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# PathSafe-Ellipse
+# Only source, configs, docs, reports and figures are tracked.
+# Everything below is either user-provided input, a regenerable cache, or a
+# large binary that can be rebuilt from the tracked code + config.
+# ---------------------------------------------------------------------------
+
+# input maps + all generated data (processed caches, intermediate samples, splits)
+data/
+
+# run logs (per-shard logs, profiling output, scratch scripts)
+logs/
+
+# duplicate model snapshots (best checkpoint is tracked, "last" is regenerable)
+outputs/checkpoints/ellipse_net_last*.pt
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# temporary
+*.tmp
+~$*

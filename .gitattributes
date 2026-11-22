@@ -1,0 +1,6 @@
+# Normalise line endings: keep LF in the repository, allow CRLF on checkout.
+* text=auto eol=lf
+*.png binary
+*.npz binary
+*.pt binary
+*.map binary
