@@ -60,6 +60,15 @@ class PathData:
     centerline_solver_iterations: int = 0
     centerline_solver_time_ms: float = 0.0
     centerline_checks: Dict[str, object] = field(default_factory=dict)
+    # --- stage-1 acceptance bookkeeping (never inferred from other flags) -----
+    accepted: bool = True
+    failures: List[str] = field(default_factory=list)
+    label_status: str = ""             # optimal_safe / feasible_not_converged / ...
+    solver_success: bool = False
+    solver_message: str = ""
+    solver_objective: float = float("nan")
+    solver_max_violation: float = float("nan")
+    acceptance: Dict[str, object] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------- #
@@ -165,47 +174,9 @@ def segment_free(scene: Scene, a: np.ndarray, b: np.ndarray, step_m: Optional[fl
     return bool(np.all(scene.is_free(path_samples(np.vstack([a, b]), step))))
 
 
-def segment_path_free(scene: Scene, q: np.ndarray, step_cells: float = 0.25) -> bool:
-    """Every point of every segment lies in free space (dense sampling)."""
-    return bool(np.all(scene.is_free(path_samples(q, step_cells * scene.r_scene))))
 
 
-def homotopy_max_lambda(scene: Scene, p: np.ndarray, q: np.ndarray,
-                        step_cells: float = 0.25,
-                        lam_step_cells: float = 0.25) -> Tuple[float, int]:
-    """Largest ``lam`` such that every deformation state ``P_lam`` is collision free.
 
-    ``P_lam = (1-lam) P + lam Q``.  ``lam`` is sampled so the largest per-station
-    displacement between consecutive states stays below ``lam_step_cells * r_scene``;
-    every intermediate path is checked densely.  Returning the *largest safe*
-    lambda (instead of only a boolean) lets the caller fall back to ``P_lam`` as
-    the accepted centre line, which is exactly the alpha-bisection of spec 4.3
-    but in a single sweep.
-    """
-    disp = float(np.max(np.linalg.norm(q - p, axis=1))) if len(p) else 0.0
-    step = max(lam_step_cells * scene.r_scene, 1e-6)
-    n_lam = max(2, int(math.ceil(disp / step)) + 1)
-    lams = np.linspace(0.0, 1.0, n_lam)
-    last_safe = 0.0
-    for lam in lams:
-        ql = (1.0 - lam) * p + lam * q
-        if not bool(np.all(scene.is_free(ql))):
-            return last_safe, n_lam
-        if not segment_path_free(scene, ql, step_cells):
-            return last_safe, n_lam
-        last_safe = float(lam)
-    return 1.0, n_lam
-
-
-def homotopy_path_free(scene: Scene, p: np.ndarray, q: np.ndarray,
-                       step_cells: float = 0.25, lam_step_cells: float = 0.25) -> Tuple[bool, int]:
-    lam, n = homotopy_max_lambda(scene, p, q, step_cells, lam_step_cells)
-    return bool(lam >= 1.0 - 1e-9), n
-
-
-# --------------------------------------------------------------------------- #
-# Route constraint domain (V2.1 section 2.2)
-# --------------------------------------------------------------------------- #
 def _point_segment_distances(pts: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Distances from each point in ``pts`` to every segment ``[a_k, b_k]``."""
     ab = b - a                                    # (M,2)
@@ -392,7 +363,7 @@ def centreline_grad(scene: Scene, q: np.ndarray, p: np.ndarray,
     a = _arc_second_derivative(q, ds)                     # (n-2,2)
     c = 2.0 / (ds[:-1] + ds[1:])                          # (n-2,)
     w_i = cons["omega"][1:-1] * L_ref2
-    coef = 2.0 * w_i[:, None] * a                          # (n-2,2)
+    coef = 2.0 * wS * w_i[:, None] * a                     # (n-2,2)
     g[2:] += coef * (c / ds[1:])[:, None]
     g[1:-1] += coef * (-c / ds[1:] - c / ds[:-1])[:, None]
     g[:-2] += coef * (c / ds[:-1])[:, None]
@@ -597,6 +568,40 @@ def _interp_offsets(p: np.ndarray, idx_c: np.ndarray, q_c: np.ndarray) -> np.nda
     return q
 
 
+def simplify_stations(scene: Scene, p: np.ndarray, cfg: Dict,
+                      target: int) -> np.ndarray:
+    """Safety-preserving thinning of the station set for the coarse problem.
+
+    Taking every k-th station (the previous behaviour) creates chords that cut
+    through walls: the coarse start point is then infeasible and SLSQP spent its
+    whole budget restoring feasibility (measured: 0.30 m violation on the S
+    channel, never converging).  This simplification only merges stations while
+    the resulting chord is clear at ``d_safe``, so the coarse path is always a
+    valid, feasible sub-path of the original route.
+    """
+    cc = cfg["centerline"]
+    d_safe = (float(cfg["robot"]["radius_m"]) + float(cfg["robot"]["safety_margin_m"])
+              + float(cc.get("numeric_margin_m", 0.01)))
+    step_cells = float(cc.get("segment_check_step_cells", 0.05))
+    n = len(p)
+    if n <= 3 or target >= n - 2:
+        return np.arange(n)
+    max_skip = max(1, int(math.ceil((n - 1) / max(target, 1))) + 1)
+    keep = [0]
+    i = 0
+    while i < n - 1:
+        best = i + 1
+        for j in range(min(n - 1, i + max_skip), i, -1):
+            if segment_path_free(scene, p[[i, j]], step_cells, d_safe=d_safe):
+                best = j
+                break
+        keep.append(best)
+        i = best
+    if keep[-1] != n - 1:
+        keep[-1] = n - 1
+    return np.unique(np.asarray(keep, dtype=int))
+
+
 def optimise_centerline_v21(scene: Scene, p: np.ndarray, cfg: Dict) -> Tuple[np.ndarray, Dict]:
     """Route-constrained clearance optimisation (multi-resolution for long paths).
 
@@ -612,8 +617,7 @@ def optimise_centerline_v21(scene: Scene, p: np.ndarray, cfg: Dict) -> Tuple[np.
     n_free = n - 2
     knot_target = int(cc.get("max_optimised_stations", 32))
     if n_free > knot_target and knot_target >= 6:
-        idx_c = np.unique(np.concatenate(
-            [[0], np.round(np.linspace(1, n - 2, knot_target)).astype(int), [n - 1]]))
+        idx_c = simplify_stations(scene, p, cfg, knot_target)
         q_c, info = _solve_v21_fixed_stations(scene, p[idx_c], cfg)
         q = _interp_offsets(p, idx_c, q_c)
         cons = build_route_constraints(p, scene, cfg)
@@ -672,17 +676,35 @@ def _solve_v21_fixed_stations(scene: Scene, p: np.ndarray, cfg: Dict) -> Tuple[n
         q[0], q[-1] = p[0], p[-1]
         J, parts = centreline_objective(scene, q, p, cons, cc)
         cand = {"init": name, "q": q, "J": J, "parts": parts,
-                "success": bool(res.success), "message": str(res.message)}
+                "success": bool(res.success), "message": str(res.message),
+                "nit": int(getattr(res, "nit", 0) or 0)}
         if best is None or J < best["J"]:
             best = cand
 
     if best is None:
         return p.copy(), {"status": "solver_failed", "iterations": total_iters,
+                          "solver_success": False, "solver_message": "all starts raised",
+                          "objective": float("nan"), "max_violation": float("nan"),
                           "time_ms": (time.perf_counter() - t0) * 1e3, "checks": {}}
 
     q = project_into_domain(scene, best["q"], p, cons, shrink=1.0)   # no-op if feasible
-    return q, {"status": "ok", "init": best["init"], "J": best["J"], "parts": best["parts"],
+    # solver status is recorded separately from geometric safety: a not-converged
+    # run can still yield a feasible centre line, and a converged one can violate
+    # geometry after projection (spec 3.3)
+    viol = -np.inf
+    for c in slsqp_cons:
+        try:
+            viol = max(viol, -float(np.min(c["fun"](_pack(best["q"])))))
+        except Exception:                              # pragma: no cover
+            pass
+    return q, {"status": "converged" if best["success"] else "not_converged",
+               "init": best["init"], "J": best["J"], "parts": best["parts"],
                "iterations": total_iters, "time_ms": (time.perf_counter() - t0) * 1e3,
+               "solver_success": bool(best["success"]),
+               "solver_message": str(best["message"]),
+               "solver_iterations_best": int(best.get("nit", 0)),
+               "objective": float(best["J"]),
+               "max_violation": float(viol) if np.isfinite(viol) else float("nan"),
                "checks": {}, "constraints": {k: v for k, v in cons.items()
                                              if k in ("R", "eta", "d_safe", "L_ref")}}
 
@@ -760,8 +782,10 @@ def optimise_centerline_legacy(scene: Scene, p: np.ndarray, cfg: Dict) -> Tuple[
     if np.any(over):
         q[over] = p[over] + dev[over] * (r_max / r[over])[:, None]
         q[0], q[-1] = p[0], p[-1]
-    return q, {"status": "ok" if (res.success or res.nit > 0) else "not_converged",
+    return q, {"status": "converged" if res.success else "not_converged",
                "iterations": int(getattr(res, "nit", 0) or 0),
+               "solver_success": bool(res.success), "solver_message": str(res.message),
+               "objective": float(res.fun), "max_violation": float("nan"),
                "time_ms": (time.perf_counter() - t0) * 1e3, "checks": {}}
 
 
@@ -775,32 +799,144 @@ def optimise_centerline(scene: Scene, p: np.ndarray, cfg: Dict) -> Tuple[np.ndar
 # --------------------------------------------------------------------------- #
 # Validation + path assembly
 # --------------------------------------------------------------------------- #
+HARD_CHECKS = ("node_free", "segment_free", "endpoints_fixed", "offset_ok",
+               "tangent_limit_ok", "clearance_ok", "station_order_ok",
+               "homotopy_verified")
+# The legacy V2 method is kept only as a comparison baseline and never emits
+# training labels; it keeps its original four hard checks and its original
+# sampling density so its published numbers stay reproducible.
+HARD_CHECKS_LEGACY = ("node_free", "segment_free", "endpoints_fixed", "offset_ok")
+
+
+def centreline_free(scene: Scene, xy_m: np.ndarray, d_safe: float) -> np.ndarray:
+    """Centre-line safety test: ``D(x) >= d_safe`` (NOT the map-level 0.29 m).
+
+    ``scene.is_free`` answers "can the robot centre ever be here" using the
+    inflation threshold (r_robot + margin).  The centre line is required to keep
+    the extra numeric margin of ``d_safe`` (0.30 m by default), so every stage of
+    the centre-line pipeline - optimisation constraints, segment collocation,
+    final validation, homotopy and the repair acceptance - goes through here.
+    """
+    return scene.distance(xy_m) >= d_safe - 1e-9
+
+
+def segment_path_free(scene: Scene, q: np.ndarray, step_cells: float = 0.25,
+                      d_safe: Optional[float] = None) -> bool:
+    """Every point of every segment satisfies the centre-line clearance."""
+    pts = path_samples(q, step_cells * scene.r_scene)
+    if d_safe is None:
+        return bool(np.all(scene.is_free(pts)))
+    return bool(np.all(centreline_free(scene, pts, d_safe)))
+
+
+def homotopy_max_lambda(scene: Scene, p: np.ndarray, q: np.ndarray,
+                        step_cells: float = 0.25, lam_step_cells: float = 0.25,
+                        d_safe: Optional[float] = None) -> Tuple[float, int]:
+    """Largest ``lam`` such that every deformation state ``P_lam`` is collision free.
+
+    ``P_lam = (1-lam) P + lam Q``.  ``lam`` is sampled so the largest per-station
+    displacement between consecutive states stays below ``lam_step_cells * r_scene``;
+    every intermediate path is checked densely at the centre-line clearance
+    ``d_safe``.  Returning the *largest safe* lambda (instead of only a boolean)
+    lets the caller fall back to ``P_lam`` as the accepted centre line, which is
+    exactly the alpha-bisection of spec 4.3 but in a single sweep.
+    """
+    disp = float(np.max(np.linalg.norm(q - p, axis=1))) if len(p) else 0.0
+    step = max(lam_step_cells * scene.r_scene, 1e-6)
+    n_lam = max(2, int(math.ceil(disp / step)) + 1)
+    lams = np.linspace(0.0, 1.0, n_lam)
+    last_safe = 0.0
+    for lam in lams:
+        ql = (1.0 - lam) * p + lam * q
+        if d_safe is None:
+            if not bool(np.all(scene.is_free(ql))):
+                return last_safe, n_lam
+        elif not bool(np.all(centreline_free(scene, ql, d_safe))):
+            return last_safe, n_lam
+        if not segment_path_free(scene, ql, step_cells, d_safe=d_safe):
+            return last_safe, n_lam
+        last_safe = float(lam)
+    return 1.0, n_lam
+
+
+def homotopy_path_free(scene: Scene, p: np.ndarray, q: np.ndarray,
+                       step_cells: float = 0.25, lam_step_cells: float = 0.25,
+                       d_safe: Optional[float] = None) -> Tuple[bool, int]:
+    lam, n = homotopy_max_lambda(scene, p, q, step_cells, lam_step_cells, d_safe=d_safe)
+    return bool(lam >= 1.0 - 1e-9), n
+
+
+def station_arc_projection(p: np.ndarray, q: np.ndarray, window: int = 3
+                           ) -> Tuple[np.ndarray, np.ndarray]:
+    """Project every centre-line station onto the *local* window of the A* path.
+
+    ``s_proj[i]`` is the arc-length parameter of the closest point of ``q_i``
+    inside ``P[j..j+1]`` for ``|j-i| <= window``.  Restricting the search to a
+    local window is what makes this usable on U-shaped routes: a global nearest
+    projection would snap stations onto the opposite leg of the same route.
+    """
+    p = np.asarray(p, dtype=float)
+    q = np.asarray(q, dtype=float)
+    n = len(p)
+    seg = np.diff(p, axis=0)
+    seg_len = np.maximum(np.linalg.norm(seg, axis=1), 1e-9)
+    s_cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+    s_proj = np.zeros(len(q))
+    dist = np.zeros(len(q))
+    for i in range(len(q)):
+        lo = max(0, i - window)
+        hi = min(n - 2, i + window)
+        best_d = np.inf
+        best_s = s_cum[min(i, n - 1)]
+        for j in range(lo, hi + 1):
+            ab = seg[j]
+            t = float(np.clip((q[i] - p[j]) @ ab / max(ab @ ab, 1e-12), 0.0, 1.0))
+            proj = p[j] + t * ab
+            d = float(np.linalg.norm(q[i] - proj))
+            if d < best_d:
+                best_d = d
+                best_s = s_cum[j] + t * seg_len[j]
+        s_proj[i] = best_s
+        dist[i] = best_d
+    return s_proj, dist
+
+
 def validate_centerline(scene: Scene, p: np.ndarray, q: np.ndarray,
                         cfg: Dict, lam_max: Optional[float] = None) -> Dict[str, object]:
-    """All geometric checks required by spec section 4.1."""
+    """Every geometric check, evaluated at the centre-line clearance ``d_safe``."""
     cc = cfg["centerline"]
     method = cc.get("method", "legacy_weighted")
-    step_cells = float(cc.get("segment_check_step_cells", 0.25))
-    lam_cells = float(cc.get("homotopy_check_step_cells", 0.25))
+    legacy = method != "route_constrained_clearance"
+    step_cells = float(cc.get("legacy_segment_check_step_cells", 0.25) if legacy
+                       else cc.get("segment_check_step_cells", 0.05))
+    lam_cells = float(cc.get("legacy_homotopy_check_step_cells", 0.25) if legacy
+                      else cc.get("homotopy_check_step_cells", 0.05))
     cons = build_route_constraints(p, scene, cfg)
+    d_safe = float(cons["d_safe"])
+    ds = None if legacy else d_safe      # legacy keeps the map threshold (is_free)
     # the per-station radius (protected against confusing distant path sections)
     # belongs to the V2.1 constraint domain; the legacy method only used R_max
-    R = cons["R"] if method == "route_constrained_clearance" else np.full(len(p), float(cc.get("r_max_m", 3.0)))
+    R = cons["R"] if method == "route_constrained_clearance" \
+        else np.full(len(p), float(cc.get("r_max_m", 3.0)))
     dev = q - p
     r = np.linalg.norm(dev, axis=1)
     t = cons["tangent"]
     tang = np.abs(np.sum(dev * t, axis=1))
     D_q = scene.distance(q)
-    node_free = bool(np.all(scene.is_free(q)))
-    seg_free = bool(segment_path_free(scene, q, step_cells))
+    node_free = bool(np.all(scene.is_free(q))) if ds is None else bool(np.all(centreline_free(scene, q, ds)))
+    seg_free = bool(segment_path_free(scene, q, step_cells, d_safe=ds))
     endp_ok = bool(np.allclose(q[0], p[0]) and np.allclose(q[-1], p[-1]))
     offset_ok = bool(np.all(r <= R + 1e-6))
     tangent_ok = bool(np.all(tang <= cons["eta"] * cons["L_i"] + 1e-6))
-    clearance_ok = bool(np.all(D_q[1:-1] >= cons["d_safe"] - 1e-6))
+    clearance_ok = bool(np.all(D_q[1:-1] >= d_safe - 1e-6))
     clear_D_p = scene.distance(p)
-    mono = bool(np.all(np.diff(cons["s_cum"]) >= 0))
+
+    # station order: monotone arc-length projection of the optimised stations
+    s_proj, proj_dist = station_arc_projection(p, q, int(cc.get("station_projection_window", 3)))
+    order_ok = bool(np.all(np.diff(s_proj) >= -float(cc.get("station_order_eps_m", 1e-6))))
+
     if lam_max is None:
-        lam_max, n_lam = homotopy_max_lambda(scene, p, q, step_cells, lam_cells)
+        lam_max, n_lam = homotopy_max_lambda(scene, p, q, step_cells, lam_cells, d_safe=ds)
     else:
         n_lam = max(2, int(math.ceil(max(float(np.max(r)), 1e-9)
                                       / max(lam_cells * scene.r_scene, 1e-6))) + 1)
@@ -814,7 +950,7 @@ def validate_centerline(scene: Scene, p: np.ndarray, q: np.ndarray,
         "offset_ok": offset_ok,
         "tangent_limit_ok": tangent_ok,
         "clearance_ok": clearance_ok,
-        "station_order_ok": mono,
+        "station_order_ok": order_ok,
         "homotopy_verified": bool(homo),
         "homotopy_states": n_lam,
         "homotopy_max_lambda": float(lam_max),
@@ -829,70 +965,139 @@ def validate_centerline(scene: Scene, p: np.ndarray, q: np.ndarray,
         "length_ratio": float(length_q / max(length_p, 1e-9)),
         "n_at_offset_limit": int(np.sum(r >= R - 1e-3)),
         "R_mean": float(np.mean(R)),
-        "d_safe": float(cons["d_safe"]),
+        "d_safe": d_safe,
         "method": method,
+        "segment_step_m": float(step_cells * scene.r_scene),
+        "homotopy_lam_step_m": float(lam_cells * scene.r_scene),
+        "n_segment_samples": int(len(path_samples(q, step_cells * scene.r_scene))),
+        "station_proj_min_m": float(np.min(proj_dist)) if len(proj_dist) else 0.0,
+        "station_proj_max_m": float(np.max(proj_dist)) if len(proj_dist) else 0.0,
+        "s_proj_min_step_m": float(np.min(np.diff(s_proj))) if len(s_proj) > 1 else 0.0,
+        "s_proj_violations": int(np.sum(np.diff(s_proj) < -float(
+            cc.get("station_order_eps_m", 1e-6)))) if len(s_proj) > 1 else 0,
     }
 
 
-def build_path(scene: Scene, start_xy: np.ndarray, goal_xy: np.ndarray, cfg: Dict) -> Optional[PathData]:
-    """A* -> resample -> route-constrained centreline -> validation (with fallback)."""
+def final_acceptance(scene: Scene, p: np.ndarray, q: np.ndarray, cfg: Dict,
+                     lam_max: Optional[float] = None,
+                     hard: Optional[Tuple[str, ...]] = None) -> Dict[str, object]:
+    """The single acceptance gate every returned centre line must pass.
+
+    No caller keeps its own hard-constraint list: optimised, blended, repaired and
+    A*-fallback paths are all handed to this function, and only ``accepted``
+    results may be used for label generation.  ``hard`` defaults to the full
+    V2.1 set; the legacy V2 baseline passes its historical four-check set.
+    """
+    chk = validate_centerline(scene, p, q, cfg, lam_max=lam_max)
+    if hard is None:
+        hard = HARD_CHECKS if cfg["centerline"].get("method",
+                                                    "legacy_weighted") == \
+            "route_constrained_clearance" else HARD_CHECKS_LEGACY
+    failures = [k for k in hard if not chk.get(k, False)]
+    chk["hard_failures"] = failures
+    chk["hard_set"] = list(hard)
+    chk["accepted"] = not failures
+    return chk
+
+
+def classify_label_status(solver_success: bool, accepted: bool, repaired: str) -> str:
+    """Map (solver outcome, geometric verdict, repair kind) to the label status.
+
+    Solver convergence and geometric safety are orthogonal: a run that hit the
+    iteration limit can still be perfectly safe (``feasible_not_converged``), and
+    a converged run can fail geometry (``infeasible``).  Keeping this a pure
+    function makes the mapping testable instead of being scattered over branches.
+    """
+    if not accepted:
+        return "infeasible"
+    if repaired == "astar_fallback":
+        return "fallback_astar"
+    return "optimal_safe" if solver_success else "feasible_not_converged"
+
+
+def build_path(scene: Scene, start_xy: np.ndarray, goal_xy: np.ndarray,
+               cfg: Dict) -> Optional[PathData]:
+    """A* -> resample -> centreline optimisation -> unified acceptance.
+
+    Candidate order: optimised Q, alpha-blended Q_lam, A* fallback.  Every candidate
+    goes through ``final_acceptance``; the returned ``label_status`` separates the
+    solver outcome from the geometric verdict, and ``accepted=False`` paths must not
+    be used to emit training labels.
+    """
     cells = astar_m(scene, start_xy, goal_xy)
     if cells is None:
         return None
     p, _idx = resample_path(scene, cells, cfg["resample"])
     if len(p) < 3:
         return None
+    cc = cfg["centerline"]
+    method = cc.get("method", "legacy_weighted")
     tangent_p = tangents_of(p)
+    step_cells = float(cc.get("segment_check_step_cells", 0.05))
+    lam_cells = float(cc.get("homotopy_check_step_cells", 0.05))
+    d_safe = (float(cfg["robot"]["radius_m"]) + float(cfg["robot"]["safety_margin_m"])
+              + float(cc.get("numeric_margin_m", 0.01)))
 
     q, info = optimise_centerline(scene, p, cfg)
-    method = cfg["centerline"].get("method", "legacy_weighted")
     q[0], q[-1] = p[0], p[-1]
-    step_cells = float(cfg["centerline"].get("segment_check_step_cells", 0.25))
-    lam_cells = float(cfg["centerline"].get("homotopy_check_step_cells", 0.25))
-    lam_max, n_lam = homotopy_max_lambda(scene, p, q, step_cells, lam_cells)
-    checks = validate_centerline(scene, p, q, cfg, lam_max=lam_max)
-    status = info.get("status", "ok")
+    solver_ok = bool(info.get("solver_success", False))
+    ds_gate = d_safe if method == "route_constrained_clearance" else None
+    lam_max, _n = homotopy_max_lambda(scene, p, q, step_cells, lam_cells, d_safe=ds_gate)
+    checks = final_acceptance(scene, p, q, cfg, lam_max=lam_max)
+    used_q, used_checks = q, checks
+    repair = ""
 
-    hard = ("node_free", "segment_free", "endpoints_fixed", "offset_ok")
-    if method == "route_constrained_clearance":
-        hard = hard + ("tangent_limit_ok", "clearance_ok")
-    failure = [k for k in hard if not checks[k]]
-
-    # Any hard failure, or a deformation that leaves the A* topology, is repaired
-    # by accepting the largest safe state of the deformation family P -> Q
-    # (spec 4.3), not by throwing the whole optimised path away.
-    if method == "route_constrained_clearance" and (failure or lam_max < 1.0 - 1e-9):
+    # repair by accepting the largest safe state of the deformation family (4.3)
+    if (not checks["accepted"] or lam_max < 1.0 - 1e-9) \
+            and method == "route_constrained_clearance":
         accept = max(0.0, lam_max * 0.98)
-        if accept >= 0.05:
+        if accept >= float(cc.get("min_blend_alpha", 0.05)):
             q_try = p + accept * (q - p)
-            chk_try = validate_centerline(scene, p, q_try, cfg)
-            if chk_try["node_free"] and chk_try["segment_free"] and chk_try["homotopy_verified"]:
-                q, checks = q_try, chk_try
-                failure = []
-                status = ("topology_limited" if accept < 0.30
-                          else f"blend_{accept:.2f}")
-        if failure or not checks["homotopy_verified"]:
-            status = "topology_limited"
-            failure = failure or ["homotopy_verified"]
+            lam_try, _ = homotopy_max_lambda(scene, p, q_try, step_cells, lam_cells, d_safe=ds_gate)
+            chk_try = final_acceptance(scene, p, q_try, cfg, lam_max=lam_try)
+            if chk_try["accepted"]:
+                used_q, used_checks = q_try, chk_try
+                repair = f"blend_{accept:.2f}"
 
-    if failure:
-        q = p.copy()
-        status = "fallback_astar:" + ",".join(failure)
-        checks = validate_centerline(scene, p, q, cfg)
+    if not used_checks["accepted"]:
+        q_fb = p.copy()
+        lam_fb, _ = homotopy_max_lambda(scene, p, q_fb, step_cells, lam_cells, d_safe=ds_gate)
+        chk_fb = final_acceptance(scene, p, q_fb, cfg, lam_max=lam_fb)
+        used_q, used_checks = q_fb, chk_fb
+        repair = "astar_fallback"
+
+    accepted = bool(used_checks["accepted"])
+    label_status = classify_label_status(solver_ok, accepted, repair)
+    if not accepted:
+        label_status = "failed"
+
+    status = label_status
+    if repair and label_status != "failed":
+        status = f"{label_status}:{repair}"
+    if label_status == "failed":
+        status = "failed:" + ",".join(used_checks["hard_failures"])
 
     return PathData(
         start_xy=np.asarray(start_xy, float), goal_xy=np.asarray(goal_xy, float),
-        astar_cells=cells, p_xy=p, q_xy=q, tangent=tangent_p,
-        clearance_p=scene.distance(p), clearance_q=scene.distance(q),
-        status=status, max_offset=float(checks["max_offset_m"]),
-        segment_ok=bool(checks["segment_free"]),
-        tangent_q=tangents_of(q),
+        astar_cells=cells, p_xy=p, q_xy=used_q, tangent=tangent_p,
+        clearance_p=scene.distance(p), clearance_q=scene.distance(used_q),
+        status=status, max_offset=float(used_checks["max_offset_m"]),
+        segment_ok=bool(used_checks["segment_free"]),
+        tangent_q=tangents_of(used_q),
         centerline_method=method,
-        centerline_clearance_gain=float(checks["clearance_gain_mean"]),
-        centerline_length_ratio=float(checks["length_ratio"]),
-        centerline_homotopy_verified=bool(checks["homotopy_verified"]),
+        centerline_clearance_gain=float(used_checks["clearance_gain_mean"]),
+        centerline_length_ratio=float(used_checks["length_ratio"]),
+        centerline_homotopy_verified=bool(used_checks["homotopy_verified"]),
         centerline_status=str(status),
         centerline_solver_iterations=int(info.get("iterations", 0)),
         centerline_solver_time_ms=float(info.get("time_ms", 0.0)),
-        centerline_checks=checks,
+        centerline_checks=used_checks,
+        accepted=accepted,
+        failures=list(used_checks["hard_failures"]),
+        label_status=label_status,
+        solver_success=bool(info.get("solver_success", False)),
+        solver_message=str(info.get("solver_message", "")),
+        solver_objective=float(info.get("objective", float("nan"))),
+        solver_max_violation=float(info.get("max_violation", float("nan"))),
+        acceptance={k: v for k, v in used_checks.items() if k != "s_proj"},
     )

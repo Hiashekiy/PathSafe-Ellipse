@@ -1,0 +1,56 @@
+{
+  "results": [
+    {
+      "test": "distance field gradient == central differences (random directions)",
+      "pass": true,
+      "detail": "worst rel/abs error 6.898e-10 m/m"
+    },
+    {
+      "test": "centreline objective gradient == finite differences (random directions)",
+      "pass": true,
+      "detail": "worst relative error 6.463e-09"
+    },
+    {
+      "test": "constraint Jacobians == finite differences (random directions)",
+      "pass": true,
+      "detail": "worst relative error 5.713e-09"
+    },
+    {
+      "test": "out-of-field points are not free and not safe",
+      "pass": true,
+      "detail": "distances [-1.0, -1.0, -1.0, -1.0, -1.0]"
+    },
+    {
+      "test": "node / segment / map thresholds are consistent and d_safe is stricter",
+      "pass": true,
+      "detail": "d_safe 0.300 m, map threshold 0.290 m, min D 0.000 m, node==(D>=d_safe) True, segment agrees True"
+    },
+    {
+      "test": "hard-constraint gate rejects every broken path",
+      "pass": true,
+      "detail": "offset:rejected, endpoints:rejected, station_order:rejected, offset_tight:rejected"
+    },
+    {
+      "test": "station order: clean path passes, swapped stations fail",
+      "pass": true,
+      "detail": "clean=True, swapped=False"
+    },
+    {
+      "test": "solver status separated from geometric status",
+      "pass": true,
+      "detail": "classifier ok; 1-iter run: success=False accepted=True status=feasible_not_converged (expected feasible_not_converged)"
+    },
+    {
+      "test": "homotopy: fine sweep is never more permissive than the coarse sweep",
+      "pass": true,
+      "detail": "coarse lambda_max 1.000, fine lambda_max 1.000"
+    },
+    {
+      "test": "infeasible clearance -> fallback is rejected too (status failed)",
+      "pass": true,
+      "detail": "accepted=False, label_status=failed, failures=['node_free', 'segment_free', 'clearance_ok', 'homotopy_verified']"
+    }
+  ],
+  "n_pass": 10,
+  "n_total": 10
+}

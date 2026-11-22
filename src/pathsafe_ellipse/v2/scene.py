@@ -147,9 +147,40 @@ class Scene:
         return np.where(inside, val, -1.0)
 
     def gradient(self, xy_m: np.ndarray) -> np.ndarray:
-        """Analytic gradient of the distance field at metric points, shape (...,2)."""
-        gx = self.sample_scalar(self.grad_x, xy_m)
-        gy = self.sample_scalar(self.grad_y, xy_m)
+        """Exact derivative of the *bilinear* distance field used by ``distance``.
+
+        Previously this interpolated a pre-computed gradient field, which is not
+        the derivative of the bilinear interpolant (a classic inconsistency that
+        silently biased the optimisation).  Inside a cell with fractional
+        coordinates ``(fc, fr)``::
+
+            D   = v00(1-fc)(1-fr) + v01 fc(1-fr) + v10 (1-fc) fr + v11 fc fr
+            dD/dx = [(v01 - v00)(1-fr) + (v11 - v10) fr] / r_scene
+            dD/dy = [(v10 - v00)(1-fc) + (v11 - v01) fc] / r_scene
+
+        The piecewise-constant derivative jumps at cell boundaries (the bilinear
+        interpolant is C0); that is reported honestly rather than smoothed.
+        """
+        xy = np.asarray(xy_m, dtype=float)
+        rc = self.cell_of(xy)
+        n = self.size
+        c = np.clip(rc[..., 0], 0, n - 1.001)
+        r = np.clip(rc[..., 1], 0, n - 1.001)
+        c0 = np.floor(c).astype(int)
+        r0 = np.floor(r).astype(int)
+        fc = c - c0
+        fr = r - r0
+        d = self.dist_m
+        v00 = d[r0, c0]
+        v01 = d[r0, c0 + 1]
+        v10 = d[r0 + 1, c0]
+        v11 = d[r0 + 1, c0 + 1]
+        gx = ((v01 - v00) * (1.0 - fr) + (v11 - v10) * fr) / self.r_scene
+        gy = ((v10 - v00) * (1.0 - fc) + (v11 - v01) * fc) / self.r_scene
+        inside = ((rc[..., 0] >= 0.0) & (rc[..., 0] <= n - 1.0)
+                  & (rc[..., 1] >= 0.0) & (rc[..., 1] <= n - 1.0))
+        gx = np.where(inside, gx, 0.0)
+        gy = np.where(inside, gy, 0.0)
         return np.stack([gx, gy], axis=-1)
 
     def is_free(self, xy_m: np.ndarray) -> np.ndarray:

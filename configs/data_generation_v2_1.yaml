@@ -51,7 +51,10 @@ centerline:
   r_max_m: 3.0                      # 五场景实验显示 3 m 已饱和（4 m 无额外收益）
   nonlocal_min_index_gap: 4         # only sections >=4 stations away count as a different route part                      # 首轮建议值（敏感性实验比较 2/3/4）
   station_tangent_limit_ratio: 0.25 # |t_i^T (q_i - p_i)| <= eta * L_i
-  numeric_margin_m: 0.01            # d_safe = 0.25 + 0.04 + 0.01 = 0.30 m
+  numeric_margin_m: 0.01
+  station_projection_window: 3      # 站点顺序检查的局部投影窗口
+  station_order_eps_m: 1.0e-6
+  min_blend_alpha: 0.05            # d_safe = 0.25 + 0.04 + 0.01 = 0.30 m
 
   w_clear: 1.0                      # 净空收益（主目标）
   w_smooth: 0.15                    # 非均匀弧长曲率
@@ -68,9 +71,11 @@ centerline:
 
   max_optimised_stations: 32        # 多分辨率：粗结点求解 + 偏移插值
   segment_collocation_points: 2     # 每段 1/3、2/3 处净空配点
-  segment_check_step_cells: 0.25
-  homotopy_check_step_cells: 0.25
-  homotopy_max_disp_cells: 0.25     # lambda 采样使相邻变形位移 <= 0.25*r_scene
+  legacy_segment_check_step_cells: 0.25   # V2 对照基线保持原采样密度
+  legacy_homotopy_check_step_cells: 0.25
+  segment_check_step_cells: 0.05     # 正式生成的高密度验证（0.0125 m）
+  homotopy_check_step_cells: 0.05    # 同伦 λ 步长同密度
+  homotopy_max_disp_cells: 0.05     # lambda 采样使相邻变形位移 <= 0.05*r_scene
 
   # legacy V2 keys (only used when method: legacy_weighted, kept for reference)
   end_ramp_m: 1.0
