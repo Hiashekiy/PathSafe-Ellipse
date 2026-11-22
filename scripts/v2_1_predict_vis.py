@@ -79,7 +79,7 @@ def draw_path(ax, npz, rows, local, off_p, ab_p, ang_p, off_g, ab_g, ang_g, mode
     n = npz["blocked"].shape[0]
     ax.imshow(npz["blocked"], cmap="gray_r", alpha=0.45, interpolation="nearest",
               extent=[0, n * rs, n * rs, 0])
-    pts_g, pts_p = [], []
+    pts_g, pts_p, pts_a = [], [], []
     for g in rows:
         i = local[g]
         sel = (npz["path_id"] == path_ids[g]) & (npz["point_id"] == point_ids[g])
@@ -91,6 +91,7 @@ def draw_path(ax, npz, rows, local, off_p, ab_p, ang_p, off_g, ab_g, ang_g, mode
         cp = p_xy + off_p[i]
         pts_g.append(cg)
         pts_p.append(cp)
+        pts_a.append(p_xy)
         if mode in ("gt", "both"):
             ax.add_patch(Ellipse((cg[0], cg[1]), 2 * ab_g[i, 0], 2 * ab_g[i, 1],
                                  angle=math.degrees(ang_g[i]), fill=False,
@@ -104,12 +105,23 @@ def draw_path(ax, npz, rows, local, off_p, ab_p, ang_p, off_g, ab_g, ang_g, mode
         if mode == "both":
             ax.annotate("", xy=(cp[0], cp[1]), xytext=(cg[0], cg[1]),
                         arrowprops=dict(arrowstyle="->", color="0.35", lw=0.6, alpha=0.8))
-    if pts_g:
-        ax.plot(*np.asarray(pts_g).T, ".", ms=2.6, color="tab:blue", zorder=5)
-    if pts_p:
-        ax.plot(*np.asarray(pts_p).T, "x", ms=2.6, color="tab:orange", zorder=5)
+    # connect the stations: the whole point is to see the trajectory, not loose rings
+    if pts_a:
+        a = np.asarray(pts_a)
+        ax.plot(a[:, 0], a[:, 1], "-", color="tab:red", lw=1.5, alpha=0.75, zorder=6,
+                label="A* path p_i")
+    if pts_g and mode in ("gt", "both"):
+        c = np.asarray(pts_g)
+        ax.plot(c[:, 0], c[:, 1], "-", color="tab:blue", lw=1.8, zorder=7,
+                label="GT centre line q_i")
+        ax.plot(c[:, 0], c[:, 1], ".", ms=3.0, color="tab:blue", zorder=8)
+    if pts_p and mode in ("pred", "both"):
+        c = np.asarray(pts_p)
+        ax.plot(c[:, 0], c[:, 1], "-", color="tab:orange", lw=1.8, zorder=7,
+                label="predicted centres q̂_i")
+        ax.plot(c[:, 0], c[:, 1], "x", ms=3.4, color="tab:orange", zorder=8)
     # keep the view on the labelled corridor
-    allc = np.vstack([np.asarray(pts_g), np.asarray(pts_p)]) if pts_g else np.zeros((1, 2))
+    allc = np.vstack([np.asarray(pts_g + pts_p + pts_a)]) if pts_g else np.zeros((1, 2))
     pad = 6.0
     ax.set_xlim(max(0, allc[:, 0].min() - pad), allc[:, 0].max() + pad)
     ax.set_ylim(allc[:, 1].max() + pad, max(0, allc[:, 1].min() - pad))
@@ -159,10 +171,12 @@ def main() -> int:
         draw_path(axes[0], npz, rows, local, off_p, ab_p, ang_p, off_g, ab_g, ang_g, "gt",
                   path_ids=pids, point_ids=ptids)
         axes[0].set_title(f"ground truth  ({len(rows)} labels)", fontsize=11)
+        axes[0].legend(loc="upper right", fontsize=8)
         draw_path(axes[1], npz, rows, local, off_p, ab_p, ang_p, off_g, ab_g, ang_g, "pred",
                   fill_pred=True, path_ids=pids, point_ids=ptids)
         axes[1].set_title(f"prediction  (IoU mean {iou_p.mean():.3f}, "
                           f"p50 {np.median(iou_p):.3f}, min {iou_p.min():.3f})", fontsize=11)
+        axes[1].legend(loc="upper right", fontsize=8)
         draw_path(axes[2], npz, rows, local, off_p, ab_p, ang_p, off_g, ab_g, ang_g, "both",
                   fill_pred=True, path_ids=pids, point_ids=ptids)
         axes[2].set_title("overlay: blue = GT, orange = prediction, grey arrow = centre error",
