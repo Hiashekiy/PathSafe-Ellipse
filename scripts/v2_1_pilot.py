@@ -66,6 +66,11 @@ def pick_scenes(records, n: int, seed: int) -> List[Dict]:
     return out
 
 
+def res_stats_p50(res) -> float:
+    a = res.labels.get("ellipse_area")
+    return float(np.median(a)) if a is not None and len(a) else 0.0
+
+
 def draw(ax, scene, res, title):
     ext = [0, scene.size * scene.r_scene, scene.size * scene.r_scene, 0]
     ax.imshow(scene.blocked, cmap="gray_r", alpha=0.55, interpolation="nearest", extent=ext)
@@ -136,6 +141,7 @@ def main() -> int:
           f"({len({map_group_id(r.file_name) for r in picks})} map groups)")
 
     scenes_out: List[Dict] = []
+    res_by_tag: Dict[str, object] = {}
     index_entries: List[Dict] = []
     for i, rec in enumerate(picks):
         src, smeta = load_moving_ai_map(os.path.join(cfg21["paths"]["map_dir"], rec.rel_path))
@@ -191,37 +197,37 @@ def main() -> int:
                                       if st["n_anchors"] else None),
             })
             index_entries.append({"scene_id": scene_id, "variant": tag,
+                                  "dir": os.path.basename(dirs[tag]),
                                   "npz": os.path.basename(dst),
                                   "n_paths": st["n_paths"], "n_anchors": st["n_anchors"]})
-            if tag == "v2":
-                fig, axes = plt.subplots(1, 3, figsize=(17, 5.6))
-            else:
-                axes[2 - 1].clear()
-            draw(axes[0] if tag == "v2" else axes[1], scene, res,
-                 f"{'V2' if tag == 'v2' else 'V2.1'}: "
-                 f"{st['n_anchors']} labels, area p50 "
-                 f"{row[tag]['areas_p50'] or 0:.1f} m2")
-            if tag == "v2":
-                _pending = (fig, axes, scene, row, scene_id)
-            else:
-                fig, axes, scene_, row_, sid = _pending
-                ax = axes[2]
-                for r in res.paths:
-                    if not r.get("accepted"):
-                        continue
-                    q = np.asarray(r["q_xy"])
-                    s = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(q, axis=0), axis=1))])
-                    ax.plot(s / max(s[-1], 1e-9), r["clearance_q"], "-", lw=1.0, color="tab:blue")
-                ax.set_xlabel("normalised arc length"); ax.set_ylabel("D(q) [m]")
-                ax.set_title("V2.1 clearance along paths"); ax.grid(alpha=0.3)
-                fig.suptitle(f"{sid}  FOV {field_m:.0f} m  r_scene {scene_.r_scene:.4f}")
-                fig.tight_layout()
-                fig.savefig(os.path.join(dirs["viz"], f"{sid}.png"), dpi=110)
-                plt.close(fig)
+            res_by_tag[tag] = (res, scene, st)
             print(f"  [{i+1}/{len(picks)}] {scene_id} [{tag:3s}] paths {st['n_paths_accepted']}/"
                   f"{st['n_paths']} labels {st['n_anchors']} safe {st['n_ellipse_safe']} "
                   f"cont {st['n_continuity_verified']} both {st['n_both_verified']} "
                   f"| area p50 {row[tag]['areas_p50'] or 0:.2f} | {ms:.0f} ms")
+        # ---- one figure per scene covering whichever variants were run
+        if res_by_tag:
+            panels = list(res_by_tag.items())
+            fig, axes = plt.subplots(1, len(panels) + 1, figsize=(5.6 * (len(panels) + 1), 5.6))
+            for ax, (tag, (res_v, scene_v, st_v)) in zip(axes, panels):
+                draw(ax, scene_v, res_v,
+                     f"{'V2.1' if tag == 'v21' else 'V2'}: {st_v['n_anchors']} labels, "
+                     f"area p50 {res_stats_p50(res_v):.1f} m2")
+            ax = axes[-1]
+            for tag, (res_v, _s, _st) in panels:
+                for r in res_v.paths:
+                    if not r.get("accepted"):
+                        continue
+                    q = np.asarray(r["q_xy"])
+                    s = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(q, axis=0), axis=1))])
+                    ax.plot(s / max(s[-1], 1e-9), r["clearance_q"], "-", lw=1.0,
+                            label="D(q)" if r is res_v.paths[0] else None)
+            ax.set_xlabel("normalised arc length"); ax.set_ylabel("D(q) [m]")
+            ax.set_title("clearance along paths"); ax.grid(alpha=0.3); ax.legend(fontsize=7)
+            fig.suptitle(f"{scene_id}  FOV {field_m:.0f} m  r_scene {scene.r_scene:.4f}")
+            fig.tight_layout()
+            fig.savefig(os.path.join(dirs["viz"], f"{scene_id}.png"), dpi=110)
+            plt.close(fig)
         scenes_out.append(row)
 
     # ---------------- summary
