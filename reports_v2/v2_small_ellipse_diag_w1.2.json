@@ -1,0 +1,99 @@
+{
+  "scene": "Berlin_2_512_part_0_0.map",
+  "w_clear": 1.2,
+  "clearance_p_mean": 1.418259642137855,
+  "clearance_q_mean": 2.018672195683495,
+  "area_p50": 9.890763681994105,
+  "rows": [
+    {
+      "station": 19,
+      "q_xy_m": [
+        24.554,
+        29.061
+      ],
+      "p_xy_m": [
+        24.188,
+        28.784
+      ],
+      "clearance_q_m": 0.889,
+      "ellipse_ab_m": [
+        0.991,
+        0.517
+      ],
+      "area_m2": 1.61,
+      "rho_of_p_i": 0.8869,
+      "p_i_inside": true,
+      "best_area_m2": 111.333,
+      "best_offset_m": [
+        4.0,
+        5.0
+      ],
+      "best_clearance_m": 7.169,
+      "best_ab_m": [
+        6.0,
+        5.906
+      ],
+      "area_ratio": 69.14
+    },
+    {
+      "station": 18,
+      "q_xy_m": [
+        23.833,
+        29.635
+      ],
+      "p_xy_m": [
+        23.683,
+        29.25
+      ],
+      "clearance_q_m": 0.868,
+      "ellipse_ab_m": [
+        1.121,
+        0.461
+      ],
+      "area_m2": 1.624,
+      "rho_of_p_i": 0.8958,
+      "p_i_inside": true,
+      "best_area_m2": 113.097,
+      "best_offset_m": [
+        -4.0,
+        5.0
+      ],
+      "best_clearance_m": 6.426,
+      "best_ab_m": [
+        6.0,
+        6.0
+      ],
+      "area_ratio": 69.65
+    },
+    {
+      "station": 20,
+      "q_xy_m": [
+        24.961,
+        28.336
+      ],
+      "p_xy_m": [
+        24.375,
+        28.112
+      ],
+      "clearance_q_m": 1.056,
+      "ellipse_ab_m": [
+        1.326,
+        0.625
+      ],
+      "area_m2": 2.602,
+      "rho_of_p_i": 0.982,
+      "p_i_inside": true,
+      "best_area_m2": 113.097,
+      "best_offset_m": [
+        5.0,
+        3.0
+      ],
+      "best_clearance_m": 6.735,
+      "best_ab_m": [
+        6.0,
+        6.0
+      ],
+      "area_ratio": 43.46
+    }
+  ]
+}
