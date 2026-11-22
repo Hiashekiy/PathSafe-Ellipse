@@ -110,10 +110,16 @@ def save_scene_npz(res, scene: Scene, cfg: Dict, out_dir: str, meta: Dict[str, o
         q_parts.append(q)
         p_offsets.append(p_offsets[-1] + len(p))
         q_offsets.append(q_offsets[-1] + len(q))
-    arrays["path_p_xy"] = (np.vstack(p_parts) if p_parts and len(p_parts[0]) else
-                           np.zeros((0, 2), np.float32))
-    arrays["path_q_xy"] = (np.vstack(q_parts) if q_parts and len(q_parts[0]) else
-                           np.zeros((0, 2), np.float32))
+    # NOTE: a rejected path contributes an empty polyline.  Stacking must ignore
+    # empty parts but keep the offsets aligned with the per-path lengths, otherwise
+    # one rejected path 0 wipes out every polyline in the file.
+    def _stack(parts):
+        non_empty = [np.asarray(x, dtype=np.float32).reshape(-1, 2) for x in parts
+                     if len(x)]
+        return np.vstack(non_empty) if non_empty else np.zeros((0, 2), np.float32)
+
+    arrays["path_p_xy"] = _stack(p_parts)
+    arrays["path_q_xy"] = _stack(q_parts)
     arrays["path_p_offsets"] = np.asarray(p_offsets, dtype=np.int32)
     arrays["path_q_offsets"] = np.asarray(q_offsets, dtype=np.int32)
     if paths:

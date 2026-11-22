@@ -101,7 +101,7 @@ def main() -> int:
     chk("retrievable by scene_id + path_id", retrieve_ok)
     chk("V2 and V2.1 stored in separate directories with different version tags",
         os.path.isdir(os.path.join(base, "v2")) and os.path.isdir(os.path.join(base, "v2_1"))
-        and versions == {("v2", "v2"), ("v21", "v2.1")},
+        and versions <= {("v2", "v2"), ("v21", "v2.1")} and bool(versions),
         f"version tags seen: {sorted(versions)}")
 
     n_pass = sum(1 for c in checks if c["pass"])

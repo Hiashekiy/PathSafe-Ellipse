@@ -66,6 +66,33 @@ def pick_scenes(records, n: int, seed: int) -> List[Dict]:
     return out
 
 
+def build_slots(records, n_scenes: int, crops_per_map: int, seed: int,
+                fields: List[float]) -> List[Dict]:
+    """Map/crop/field slots: several crops per map so the dataset can grow past
+    the number of available maps without duplicating a single view."""
+    records = sorted(records, key=lambda r: r.file_name)
+    if crops_per_map <= 1:
+        picked = pick_scenes(records, min(n_scenes, len(records)), seed)
+        return [{"rec": r, "crop": 0, "field_m": float(fields[i % len(fields)]),
+                 "seed": int(seed + i)} for i, r in enumerate(picked)]
+    slots: List[Dict] = []
+    k = 0
+    while len(slots) < n_scenes:
+        for rec in records:
+            for c in range(crops_per_map):
+                slots.append({
+                    "rec": rec, "crop": c,
+                    "field_m": float(fields[(k + c) % len(fields)]),
+                    "seed": int(seed + 977 * k + 131 * c),
+                })
+                if len(slots) >= n_scenes:
+                    break
+            k += 1
+            if len(slots) >= n_scenes:
+                break
+    return slots
+
+
 def res_stats_p50(res) -> float:
     a = res.labels.get("ellipse_area")
     return float(np.median(a)) if a is not None and len(a) else 0.0
@@ -117,7 +144,10 @@ def main() -> int:
     ap.add_argument("--paths-per-scene", type=int, default=2)
     ap.add_argument("--seed", type=int, default=2024)
     ap.add_argument("--tag", default="stage2")
-    ap.add_argument("--pairs", default="all", help="all|v21 (v21 only, for the 20-scene pilot)")
+    ap.add_argument("--pairs", default="all", help="all|v21")
+    ap.add_argument("--crops-per-map", type=int, default=1)
+    ap.add_argument("--shard", type=int, default=0)
+    ap.add_argument("--num-shards", type=int, default=1)
     args = ap.parse_args()
 
     cfg2 = load_cfg(args.config_v2)
@@ -136,26 +166,34 @@ def main() -> int:
         os.makedirs(d, exist_ok=True)
 
     records = [r for r in build_map_catalog(cfg21["paths"]["map_dir"], 0.25) if r.parsed_ok]
-    picks = pick_scenes(records, args.n_scenes, args.seed)
-    print(f"selected {len(picks)} scenes from {len(records)} maps "
-          f"({len({map_group_id(r.file_name) for r in picks})} map groups)")
+    slots = build_slots(records, args.n_scenes, args.crops_per_map, args.seed,
+                        cfg21["scene"]["physical_fields_m"])
+    if args.num_shards > 1:
+        slots = slots[args.shard::args.num_shards]
+    picks = slots
+    print(f"shard {args.shard}/{args.num_shards}: {len(picks)} slots "
+          f"({len({s['rec'].file_name for s in picks})} maps, "
+          f"{len({map_group_id(s['rec'].file_name) for s in picks})} map groups, "
+          f"crops/map {args.crops_per_map})")
 
     scenes_out: List[Dict] = []
     res_by_tag: Dict[str, object] = {}
     index_entries: List[Dict] = []
-    for i, rec in enumerate(picks):
+    for i, slot in enumerate(picks):
+        rec = slot["rec"]
         src, smeta = load_moving_ai_map(os.path.join(cfg21["paths"]["map_dir"], rec.rel_path))
         r0 = float(smeta["resolution"] or 0.25)
-        field_m = float(cfg21["scene"]["physical_fields_m"][i % 3])
+        field_m = float(slot["field_m"])
         crop_px = int(round(field_m / r0))
         h, w = src.shape
         if crop_px >= h or crop_px >= w:
             print(f"  skip {rec.file_name}: map {w}x{h} < crop {crop_px}")
             continue
-        rng = np.random.default_rng(args.seed + i)
+        rng = np.random.default_rng(slot["seed"])
         x0 = int(rng.integers(0, w - crop_px))
         y0 = int(rng.integers(0, h - crop_px))
-        scene_id = f"{os.path.splitext(rec.file_name)[0]}_c{x0}_{y0}_f{int(field_m)}"
+        scene_id = (f"{os.path.splitext(rec.file_name)[0]}_c{x0}_{y0}"
+                    f"_f{int(field_m)}_k{slot['crop']}")
         row: Dict[str, object] = {
             "scene_id": scene_id, "map": rec.file_name, "rel_path": rec.rel_path,
             "map_group": map_group_id(rec.file_name), "crop": [x0, y0],
@@ -169,7 +207,7 @@ def main() -> int:
                                 float(cfg["robot"]["safety_margin_m"]),
                                 int(cfg["robot"]["edt_upsample"]), scene_id, rec.file_name)
             try:
-                res, meta, dst, ms = run_variant(scene, cfg, args.seed + i, rec, dirs[tag],
+                res, meta, dst, ms = run_variant(scene, cfg, slot["seed"], rec, dirs[tag],
                                                  "" if tag == "v21" else "v2_", {"variant": tag})
             except Exception as exc:                     # keep the failure record
                 row[tag] = {"error": f"{type(exc).__name__}: {exc}"}
@@ -255,10 +293,11 @@ def main() -> int:
             "total_both_verified_v2": int(sum(r["v2"]["n_both_verified"] for r in scenes_out if "v2" in r)),
             "total_both_verified_v21": int(sum(r["v21"]["n_both_verified"] for r in scenes_out if "v21" in r)),
         }
-    dst = os.path.join(dirs["report"], f"pilot_{args.tag}_summary.json")
+    suffix = f"_shard{args.shard}of{args.num_shards}" if args.num_shards > 1 else ""
+    dst = os.path.join(dirs["report"], f"pilot_{args.tag}{suffix}_summary.json")
     with open(dst, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2, default=float)
-    idx = write_index(out_root, index_entries)
+    idx = write_index(out_root, index_entries, name=f"index{suffix}.json")
     print(f"\nsummary -> {dst}\nindex   -> {idx}\nnpz     -> {dirs['v21']} / {dirs['v2']}")
 
     # ---------------- verify the NPZ round-trip
