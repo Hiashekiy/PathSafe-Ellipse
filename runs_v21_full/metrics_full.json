@@ -40,16 +40,11 @@
       "epochs_run": 116,
       "iou_raw_mean": 0.7646048665046692,
       "iou_raw_p50": 0.8123413324356079,
-      "iou_proj_mean": 0.7640654444694519,
-      "iou_proj_p50": 0.8123413324356079,
       "centre_err_m": 0.4696415662765503,
       "area_ratio_p50": 0.9188376665115356,
-      "safe_rate_raw": 0.8066666666666666,
-      "safe_rate_proj": 1.0,
+      "raw_collision_free_rate": 0.8066666666666666,
       "n_safety_checked": 300,
-      "shrink_gamma_p50": 1.0,
-      "shrink_used_rate": 0.19333333333333333,
-      "time_s": 67.11340890004067
+      "time_s": 72.13447529997211
     },
     {
       "seed": 1,
@@ -58,16 +53,11 @@
       "epochs_run": 91,
       "iou_raw_mean": 0.7866383790969849,
       "iou_raw_p50": 0.8181818127632141,
-      "iou_proj_mean": 0.786250650882721,
-      "iou_proj_p50": 0.8181818127632141,
       "centre_err_m": 0.46669137477874756,
       "area_ratio_p50": 0.9882662296295166,
-      "safe_rate_raw": 0.76,
-      "safe_rate_proj": 1.0,
+      "raw_collision_free_rate": 0.76,
       "n_safety_checked": 300,
-      "shrink_gamma_p50": 1.0,
-      "shrink_used_rate": 0.24,
-      "time_s": 51.642869999981485
+      "time_s": 52.241192399989814
     },
     {
       "seed": 2,
@@ -76,26 +66,17 @@
       "epochs_run": 107,
       "iou_raw_mean": 0.7665148377418518,
       "iou_raw_p50": 0.8059309720993042,
-      "iou_proj_mean": 0.7657262682914734,
-      "iou_proj_p50": 0.8052149415016174,
       "centre_err_m": 0.47610366344451904,
       "area_ratio_p50": 0.9271762371063232,
-      "safe_rate_raw": 0.8066666666666666,
-      "safe_rate_proj": 1.0,
+      "raw_collision_free_rate": 0.8066666666666666,
       "n_safety_checked": 300,
-      "shrink_gamma_p50": 1.0,
-      "shrink_used_rate": 0.19333333333333333,
-      "time_s": 61.17251269996632
+      "time_s": 62.41961969999829
     }
   ],
   "summary": {
     "iou_raw_mean": {
       "mean": 0.7725860277811686,
       "std": 0.009967060103462742
-    },
-    "iou_proj_mean": {
-      "mean": 0.7720141212145487,
-      "std": 0.010089554555298232
     },
     "iou_raw_p50": {
       "mean": 0.8121513724327087,
@@ -109,21 +90,9 @@
       "mean": 0.9447600444157919,
       "std": 0.030951295651709072
     },
-    "safe_rate_raw": {
+    "raw_collision_free_rate": {
       "mean": 0.791111111111111,
       "std": 0.021998877636914795
-    },
-    "safe_rate_proj": {
-      "mean": 1.0,
-      "std": 0.0
-    },
-    "shrink_gamma_p50": {
-      "mean": 1.0,
-      "std": 0.0
-    },
-    "shrink_used_rate": {
-      "mean": 0.2088888888888889,
-      "std": 0.02199887763691481
     },
     "best_epoch": {
       "mean": 83.66666666666667,

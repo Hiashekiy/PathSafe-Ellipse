@@ -72,21 +72,6 @@ def S_from(ab: np.ndarray, ang: float) -> np.ndarray:
     return R @ np.diag(np.asarray(ab, dtype=float) ** 2) @ R.T
 
 
-def safe_shrink(ab: np.ndarray, ang: float, centre: np.ndarray, blocked: np.ndarray,
-                rs: float, iters: int = 18) -> Tuple[float, bool]:
-    """Largest scale gamma <= 1 keeping the ellipse collision free (bisection)."""
-    if exact_clearance(S_from(ab, ang), centre, blocked, rs)[0]:
-        return 1.0, True
-    lo, hi = 0.0, 1.0
-    for _ in range(iters):
-        mid = 0.5 * (lo + hi)
-        if exact_clearance(S_from(ab * mid, ang), centre, blocked, rs)[0]:
-            lo = mid
-        else:
-            hi = mid
-    return lo, lo > 0.02
-
-
 def augment(patch, lidar, tangent, extra, off, axes, ang2, rng) -> tuple:
     """Consistent mirror augmentation applied to a whole batch.
 
@@ -242,11 +227,11 @@ def run_seed(table, masks, args, seed: int, device: str, scene_cache) -> Dict:
 
     iou_raw = ellipse_iou(off_p, ab_p, ang_p, off_g, ab_g, ang_g)
 
-    # ---- safe projection on the test split
+    # ---- diagnostic only: how often is the RAW prediction already collision free?
+    # Collisions are expected for a regression head; the analytic safety step is
+    # applied downstream, so nothing is projected or rescaled here.
     test_glob = np.flatnonzero(mask_te)
-    gammas, safe_raw, safe_proj = [], 0, 0
-    ab_proj = ab_p.copy()
-    n_chk = 0
+    safe_raw, n_chk = 0, 0
     for i_loc, i_glob in enumerate(test_glob[: args.safety_check]):
         sid = str(table["scene_id"][i_glob])
         npz = scene_cache.get(sid)
@@ -263,29 +248,19 @@ def run_seed(table, masks, args, seed: int, device: str, scene_cache) -> Dict:
         p_xy = npz["p_xy"][j].astype(float)
         bl = npz["blocked"].astype(np.uint8)
         centre = p_xy + off_p[i_loc]
-        k0, _ = safe_shrink(ab_p[i_loc], ang_p[i_loc], centre, bl, rs)
-        safe_raw += int(k0 >= 1.0 - 1e-9)
-        g, _ok = safe_shrink(ab_p[i_loc], ang_p[i_loc], centre, bl, rs)
-        ab_proj[i_loc] = ab_p[i_loc] * g
-        gammas.append(g)
-        safe_proj += int(g > 0)
+        ok, _, _, _ = exact_clearance(S_from(ab_p[i_loc], ang_p[i_loc]), centre, bl, rs)
+        safe_raw += int(ok)
         n_chk += 1
-    iou_proj = ellipse_iou(off_p, ab_proj, ang_p, off_g, ab_g, ang_g)
-    gammas = np.asarray(gammas)
     return {
         "seed": seed, "best_epoch": best["ep"], "best_val": best["val"],
         "epochs_run": len(hist["train"]),
         "hist": hist,
         "iou_raw_mean": float(iou_raw.mean()), "iou_raw_p50": float(np.median(iou_raw)),
-        "iou_proj_mean": float(iou_proj.mean()), "iou_proj_p50": float(np.median(iou_proj)),
         "centre_err_m": float(np.linalg.norm(off_p - off_g, axis=1).mean()),
         "area_ratio_p50": float(np.median((np.pi * ab_p[:, 0] * ab_p[:, 1])
                                           / np.maximum(np.pi * ab_g[:, 0] * ab_g[:, 1], 1e-6))),
-        "safe_rate_raw": safe_raw / max(n_chk, 1),
-        "safe_rate_proj": safe_proj / max(n_chk, 1),
+        "raw_collision_free_rate": safe_raw / max(n_chk, 1),
         "n_safety_checked": n_chk,
-        "shrink_gamma_p50": float(np.median(gammas)) if len(gammas) else None,
-        "shrink_used_rate": float(np.mean(gammas < 1.0 - 1e-9)) if len(gammas) else None,
         "model": {k: v for k, v in model.state_dict().items()},
     }
 
@@ -326,15 +301,15 @@ def main() -> int:
         r = run_seed(table, masks, args, seed, device, cache)
         r["time_s"] = time.perf_counter() - t1
         print(f"[seed {seed}] ep {r['best_epoch']:3d}/{r['epochs_run']:3d} "
-              f"val {r['best_val']:.4f} | IoU raw {r['iou_raw_mean']:.4f} "
-              f"proj {r['iou_proj_mean']:.4f} | safe raw {r['safe_rate_raw']:.3f} "
-              f"proj {r['safe_rate_proj']:.3f} | centre {r['centre_err_m']:.3f} m "
-              f"| gamma p50 {r['shrink_gamma_p50']:.2f} | {r['time_s']:.0f}s")
+              f"val {r['best_val']:.4f} | IoU {r['iou_raw_mean']:.4f} "
+              f"(p50 {r['iou_raw_p50']:.4f}) | centre {r['centre_err_m']:.3f} m "
+              f"| area ratio {r['area_ratio_p50']:.3f} "
+              f"| collision-free(raw) {r['raw_collision_free_rate']:.3f} "
+              f"| {r['time_s']:.0f}s")
         runs.append(r)
 
-    keys = ("iou_raw_mean", "iou_proj_mean", "iou_raw_p50", "centre_err_m",
-            "area_ratio_p50", "safe_rate_raw", "safe_rate_proj", "shrink_gamma_p50",
-            "shrink_used_rate", "best_epoch")
+    keys = ("iou_raw_mean", "iou_raw_p50", "centre_err_m", "area_ratio_p50",
+            "raw_collision_free_rate", "best_epoch")
     summary = {k: {"mean": float(np.mean([r[k] for r in runs])),
                    "std": float(np.std([r[k] for r in runs]))} for k in keys if
                all(r[k] is not None for r in runs)}
@@ -348,14 +323,17 @@ def main() -> int:
     axes[0].set_xlabel("epoch"); axes[0].set_ylabel("val loss")
     axes[0].set_title("validation loss per seed"); axes[0].legend(fontsize=7)
     axes[0].grid(alpha=0.3)
-    axes[1].bar(["raw", "projected"], [summary["iou_raw_mean"]["mean"],
-                                      summary["iou_proj_mean"]["mean"]])
-    axes[1].set_ylabel("test IoU"); axes[1].set_title("IoU: raw vs safe-projected")
-    axes[1].grid(alpha=0.3)
-    axes[2].bar(["raw", "projected"], [summary["safe_rate_raw"]["mean"],
-                                       summary["safe_rate_proj"]["mean"]])
-    axes[2].set_ylim(0, 1.05); axes[2].set_ylabel("exact-verified safe rate")
-    axes[2].set_title("safety: raw vs safe-projected"); axes[2].grid(alpha=0.3)
+    axes[1].errorbar(["raw"], [summary["iou_raw_mean"]["mean"]],
+                     yerr=[summary["iou_raw_mean"]["std"]], fmt="o", capsize=5)
+    axes[1].set_ylabel("test IoU (mean +- std over seeds)")
+    axes[1].set_title("IoU of raw predictions"); axes[1].grid(alpha=0.3)
+    axes[1].set_ylim(0, 1)
+    axes[2].errorbar(["raw"], [summary["raw_collision_free_rate"]["mean"]],
+                     yerr=[summary["raw_collision_free_rate"]["std"]], fmt="o", capsize=5)
+    axes[2].set_ylim(0, 1.05)
+    axes[2].set_ylabel("fraction collision free")
+    axes[2].set_title("raw predictions vs obstacles\n(diagnostic only, no repair here)")
+    axes[2].grid(alpha=0.3)
     axes[3].hist(runs[0]["hist"]["train"], bins=30, alpha=0.6, label="train")
     axes[3].hist(runs[0]["hist"]["val"], bins=30, alpha=0.6, label="val")
     axes[3].set_xlabel("loss"); axes[3].set_title("loss distribution (seed 0)")
