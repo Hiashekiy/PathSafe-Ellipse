@@ -1,0 +1,129 @@
+{
+  "n_scenes": 4,
+  "n_anchors": 176,
+  "n_verified_safe": 176,
+  "ellipse_ms_median_of_medians": 68.81262500246521,
+  "total_s": 89.56,
+  "scenes": [
+    {
+      "scene_id": "Paris_0_1024_part_1_0_crop200_218_f48",
+      "source_map_id": "Paris_0_1024_part_1_0.map",
+      "physical_field_m": 48.0,
+      "r_scene": 0.1875,
+      "crop_px": 192,
+      "crop_origin": [
+        200,
+        218
+      ],
+      "density_inflated": 0.36517333984375,
+      "density_raw": 0.338623046875,
+      "n_paths": 2,
+      "n_anchors": 25,
+      "n_inserted": 0,
+      "statuses": {
+        "optimal": 25
+      },
+      "solve_ms_median": 183.13699998543598,
+      "solve_ms_p95": 304.70177498646075,
+      "scene_ms": 12712.779599998612,
+      "label_version": "v2",
+      "centerline_method": "route_constrained_clearance",
+      "centerline_topology_verified": true,
+      "centerline_clearance_gain_mean": 0.8261175085371316,
+      "source_rel_path": "val\\Paris_0_1024_part_1_0.map",
+      "map_group": "Paris_0",
+      "free_components": 1,
+      "largest_component_cells": 41604
+    },
+    {
+      "scene_id": "London_2_512_part_0_0_crop233_1_f64",
+      "source_map_id": "London_2_512_part_0_0.map",
+      "physical_field_m": 64.0,
+      "r_scene": 0.25,
+      "crop_px": 256,
+      "crop_origin": [
+        233,
+        1
+      ],
+      "density_inflated": 0.35394287109375,
+      "density_raw": 0.2824249267578125,
+      "n_paths": 2,
+      "n_anchors": 77,
+      "n_inserted": 8,
+      "statuses": {
+        "optimal": 77
+      },
+      "solve_ms_median": 55.04559999099001,
+      "solve_ms_p95": 70.73409998556599,
+      "scene_ms": 31169.609300035518,
+      "label_version": "v2",
+      "centerline_method": "route_constrained_clearance",
+      "centerline_topology_verified": true,
+      "centerline_clearance_gain_mean": 0.6616617844442314,
+      "source_rel_path": "val\\London_2_512_part_0_0.map",
+      "map_group": "London_2",
+      "free_components": 9,
+      "largest_component_cells": 39301
+    },
+    {
+      "scene_id": "Boston_0_1024_part_0_0_crop58_65_f80",
+      "source_map_id": "Boston_0_1024_part_0_0.map",
+      "physical_field_m": 80.0,
+      "r_scene": 0.3125,
+      "crop_px": 320,
+      "crop_origin": [
+        58,
+        65
+      ],
+      "density_inflated": 0.30218505859375,
+      "density_raw": 0.2530975341796875,
+      "n_paths": 2,
+      "n_anchors": 54,
+      "n_inserted": 0,
+      "statuses": {
+        "optimal": 54
+      },
+      "solve_ms_median": 59.942749998299405,
+      "solve_ms_p95": 74.56318501208442,
+      "scene_ms": 25134.43949999055,
+      "label_version": "v2",
+      "centerline_method": "route_constrained_clearance",
+      "centerline_topology_verified": true,
+      "centerline_clearance_gain_mean": 1.0165732003914756,
+      "source_rel_path": "val\\Boston_0_1024_part_0_0.map",
+      "map_group": "Boston_0",
+      "free_components": 6,
+      "largest_component_cells": 45699
+    },
+    {
+      "scene_id": "Sydney_2_1024_part_0_0_crop258_253_f48",
+      "source_map_id": "Sydney_2_1024_part_0_0.map",
+      "physical_field_m": 48.0,
+      "r_scene": 0.1875,
+      "crop_px": 192,
+      "crop_origin": [
+        258,
+        253
+      ],
+      "density_inflated": 0.038055419921875,
+      "density_raw": 0.0349884033203125,
+      "n_paths": 2,
+      "n_anchors": 20,
+      "n_inserted": 0,
+      "statuses": {
+        "optimal": 20
+      },
+      "solve_ms_median": 77.68250000663102,
+      "solve_ms_p95": 113.20305001572706,
+      "scene_ms": 15025.471500004642,
+      "label_version": "v2",
+      "centerline_method": "route_constrained_clearance",
+      "centerline_topology_verified": true,
+      "centerline_clearance_gain_mean": 0.11298940108440123,
+      "source_rel_path": "val\\Sydney_2_1024_part_0_0.map",
+      "map_group": "Sydney_2",
+      "free_components": 1,
+      "largest_component_cells": 63042
+    }
+  ]
+}

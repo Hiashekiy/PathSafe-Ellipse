@@ -101,6 +101,7 @@ class Scene:
     density_inflated: float
     density_raw: float
     clearance_max_m: float
+    free_distance_m: float = 0.29     # D(x) > this == robot-centre free
     meta: Dict[str, object] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ lookup
@@ -131,8 +132,19 @@ class Scene:
                 + v10 * (1 - fc) * fr + v11 * fc * fr)
 
     def distance(self, xy_m: np.ndarray) -> np.ndarray:
-        """Distance-field value in metres at metric points."""
-        return self.sample_scalar(self.dist_m, xy_m)
+        """Distance-field value in metres at metric points.
+
+        Points outside the scene return ``-1`` (blocked): bilinear sampling
+        clamps to the border, which would otherwise report free space outside
+        the map whenever the border cell happens to be free.
+        """
+        xy = np.asarray(xy_m, dtype=float)
+        rc = self.cell_of(xy)
+        n = self.size
+        inside = ((rc[..., 0] >= 0.0) & (rc[..., 0] <= n - 1.0)
+                  & (rc[..., 1] >= 0.0) & (rc[..., 1] <= n - 1.0))
+        val = self.sample_scalar(self.dist_m, xy)
+        return np.where(inside, val, -1.0)
 
     def gradient(self, xy_m: np.ndarray) -> np.ndarray:
         """Analytic gradient of the distance field at metric points, shape (...,2)."""
@@ -141,10 +153,14 @@ class Scene:
         return np.stack([gx, gy], axis=-1)
 
     def is_free(self, xy_m: np.ndarray) -> np.ndarray:
-        rc = np.rint(self.cell_of(xy_m)).astype(int)
-        rc[..., 0] = np.clip(rc[..., 0], 0, self.size - 1)
-        rc[..., 1] = np.clip(rc[..., 1], 0, self.size - 1)
-        return ~self.blocked[rc[..., 1], rc[..., 0]]
+        """Continuous free-space test on the distance field.
+
+        Uses ``D(x) > r_robot + margin`` evaluated at the *continuous* point, i.e.
+        exactly the criterion that produced ``blocked``.  Rounding to the nearest
+        cell centre instead would disagree with the optimiser's clearance
+        constraint and falsely flag feasible centre lines as collisions.
+        """
+        return self.distance(xy_m) > self.free_distance_m
 
     def obstacle_cells(self) -> np.ndarray:
         """Centres (metres) of all occupied cells — used by the exact safety test."""
@@ -221,6 +237,7 @@ def build_scene(
         density_inflated=float(blocked.mean()),
         density_raw=float(occ.mean()),
         clearance_max_m=float(np.max(dist)),
+        free_distance_m=float(robot_radius_m + safety_margin_m),
     )
     return scene
 

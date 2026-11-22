@@ -57,14 +57,19 @@ def sample_start_goal(scene: Scene, rng: np.random.Generator, cfg: Dict,
 # Sparse adaptive anchors
 # --------------------------------------------------------------------------- #
 def anchor_indices(scene: Scene, path: PathData, ac: Dict) -> List[int]:
-    """Sparse adaptive anchor selection along the centreline (spec section 5.1)."""
+    """Sparse adaptive anchor selection along the centreline (spec section 5.1).
+
+    Spacing, arc length AND curvature all use the optimised centreline ``q``
+    itself (the A* tangent is a separate feature and must not be mixed in here).
+    """
     q = path.q_xy
     if len(q) < 2:
         return [0]
     seg = np.linalg.norm(np.diff(q, axis=0), axis=1)
     s_cum = np.concatenate([[0.0], np.cumsum(seg)])
     total = float(s_cum[-1])
-    dur = np.diff(path.tangent, axis=0)          # (n-1,)
+    tangent_q = path.tangent_q if getattr(path, "tangent_q", None) is not None else tangents_of(q)
+    dur = np.diff(tangent_q, axis=0)
     curv = np.zeros(len(q))
     curv[1:] = np.linalg.norm(dur, axis=1) / np.maximum(seg, 1e-9)
 
@@ -244,6 +249,12 @@ def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneRes
             "n_inserted": len(inserted),
             "max_offset_m": path.max_offset,
             "segment_ok": path.segment_ok,
+            "centerline_method": getattr(path, "centerline_method", "legacy_weighted"),
+            "homotopy_verified": bool(getattr(path, "centerline_homotopy_verified", False)),
+            "clearance_gain_mean": float(getattr(path, "centerline_clearance_gain", 0.0)),
+            "length_ratio": float(getattr(path, "centerline_length_ratio", 1.0)),
+            "centerline_ms": float(getattr(path, "centerline_solver_time_ms", 0.0)),
+            "centerline_checks": dict(getattr(path, "centerline_checks", {})),
             "clearance_p_mean": float(np.mean(path.clearance_p)),
             "clearance_q_mean": float(np.mean(path.clearance_q)),
             "length_m": float(np.sum(np.linalg.norm(np.diff(path.q_xy, axis=0), axis=1))),
@@ -278,7 +289,12 @@ def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneRes
         "solve_ms_median": float(np.median(solve_times)) if solve_times else None,
         "solve_ms_p95": float(np.percentile(solve_times, 95)) if solve_times else None,
         "scene_ms": (time.perf_counter() - t_scene) * 1e3,
-        "label_version": "v2",
+        "label_version": str(cfg["project"].get("label_version", "v2")),
+        "centerline_method": (path_records[0]["centerline_method"] if path_records else None),
+        "centerline_topology_verified": (
+            all(bool(r["homotopy_verified"]) for r in path_records) if path_records else None),
+        "centerline_clearance_gain_mean": (
+            float(np.mean([r["clearance_gain_mean"] for r in path_records])) if path_records else None),
     }
     return SceneResult(scene=scene, paths=path_records, labels=arrays, stats=stats,
                        halfspaces=halfspaces_all)
