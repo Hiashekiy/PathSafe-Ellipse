@@ -1,4 +1,4 @@
-﻿"""Tests for ellipse -> convex polytope inflation (``ellipsenet.geometry.polytopes``).
+"""Tests for ellipse -> convex polytope inflation (``ellipsenet.geometry.polytopes``).
 
     python tests/test_polytopes.py
 
@@ -116,6 +116,24 @@ def main() -> int:
     rep = verify_polytopes(p, m, RES)
     check("wall: no blocked square inside the region", rep["violating_cells"] == 0,
           str(rep))
+
+    # ------------------------------------------- 3b colliding ellipse still gets a region
+    # centre 0.7 m from the wall face at 14.875 m, semi-major 1.0 m -> the ellipse itself
+    # crosses the wall, so no region can contain it; the region must still be anchored on
+    # its centre and stay obstacle free (that is what a planner needs)
+    m = wall_map()
+    c = torch.tensor([[14.2, 12.0]])
+    a = torch.tensor([1.0])
+    bb = torch.tensor([0.6])
+    th = torch.tensor([0.0])
+    p = build_polytopes(c, a, bb, th, m, RES, window_margin_m=6.0)
+    rep = verify_polytopes(p, m, RES)
+    check("colliding ellipse: region is still obstacle free", rep["violating_cells"] == 0.0,
+          str(rep))
+    check("colliding ellipse: region contains its centre", bool(p.centre_ok[0]))
+    check("colliding ellipse: reported as not containing the whole ellipse",
+          not bool(p.feasible[0]))
+    check("colliding ellipse: region converges", bool(p.converged[0]))
 
     # ---------------------------------------------------------------- 3 small room
     m = room_map()

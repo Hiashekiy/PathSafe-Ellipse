@@ -50,7 +50,8 @@ class Polytopes:
     n_rounds: torch.Tensor   # (N,)     inflation planes added from the local window
     center: torch.Tensor     # (N, 2)   ellipse centre [m]
     radius: torch.Tensor     # (N,)     semi-major axis [m] (diagnostics)
-    feasible: torch.Tensor   # (N,) bool: no added face cut the ellipse itself
+    feasible: torch.Tensor   # (N,) bool: the region contains the whole ellipse
+    centre_ok: torch.Tensor  # (N,) bool: the region contains the ellipse centre
 
     def planes(self, i: int) -> Tuple[np.ndarray, np.ndarray]:
         k = int(self.n_planes[i])
@@ -397,9 +398,6 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
         normal = torch.einsum("nij,ndj->ndi", Q, obs - centres[:, None, :])
         normal = normal / normal.norm(dim=-1, keepdim=True).clamp_min(1e-9)
         offset = cell_face(normal, obs, half) - region_margin_m       # (N,D)
-        cuts = (ellipse_support(Q.unsqueeze(1), centres.unsqueeze(1), normal)
-                > (offset + region_margin_m + 1e-6))
-        feasible = feasible & ~(has & cuts).any(dim=1)
         A[:, 8:8 + D] = torch.where(has[..., None], normal, torch.zeros_like(normal))
         off[:, 8:8 + D] = torch.where(has, offset, torch.full_like(offset, BIG))
         n_planes = torch.full((N,), 8 + D, dtype=torch.long, device=device)
@@ -414,9 +412,18 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
     # ---- inflation loop: add the face of the closest obstacle still inside, then drop every
     # obstacle that face already excludes.  The active set is monotonically shrinking and
     # empty means "no obstacle has a corner inside the region", i.e. it IS the verification.
+    #
+    # Every ellipse is processed, including the ones that collide with an obstacle: for those
+    # no region can contain the *whole* ellipse, but a region around its **centre** that
+    # avoids every obstacle always exists (unless the centre itself is blocked), so the
+    # selection keeps going and the result is simply a tighter region.  ``feasible`` at the
+    # end only records whether the ellipse ended up fully contained.
+    blocked_centre = blocked[
+        torch.round(centres[:, 1] / res).long().clamp(0, H - 1),
+        torch.round(centres[:, 0] / res).long().clamp(0, W - 1)] > 0.5
     for _ in range(P if refine else 0):
         active = still_violating() & cand_ok
-        any_bad = active.any(dim=1) & feasible & (n_planes < P)
+        any_bad = active.any(dim=1) & (n_planes < P) & ~blocked_centre
         if not bool(any_bad.any()):
             break
         idx = active.float().argmax(dim=1)                            # closest (metric order)
@@ -424,13 +431,6 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
         normal = torch.einsum("nij,nj->ni", Q, obs - centres)
         normal = normal / normal.norm(dim=-1, keepdim=True).clamp_min(1e-9)
         offset = cell_face(normal, obs, half) - region_margin_m
-        # a face that cuts the ellipse means this ellipse (or this margin) is infeasible:
-        # no obstacle-free region can contain it, so stop adding faces for it
-        # infeasible only if the face really cuts the ellipse: compare with the face *before*
-        # the region margin is subtracted, otherwise a merely grazing (but exactly safe)
-        # ellipse is abandoned and keeps leaving obstacle cells unhandled
-        cuts = ellipse_support(Q, centres, normal) > (offset + region_margin_m + 1e-6)
-        feasible = feasible & ~(any_bad & cuts)
         slot = n_planes.clamp_max(P - 1)
         A[ar[any_bad], slot[any_bad]] = normal[any_bad]
         off[ar[any_bad], slot[any_bad]] = offset[any_bad]
@@ -441,9 +441,21 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
     converged = ~((still_violating() & cand_ok).any(dim=1)
                   | _vertex_hits(A[:, :P], off, blocked, res))
 
+    # ---- diagnostics computed once at the end (no effect on the construction)
+    S = torch.linalg.inv(Q)
+    quad = torch.einsum("npi,nij,npj->np", A, S, A).clamp_min(0.0)        # (N,P)
+    n_ell = (A * centres[:, None, :]).sum(-1) + torch.sqrt(quad)           # ellipse support
+    n_cen = (A * centres[:, None, :]).sum(-1)                             # value at centre
+    valid = (torch.arange(P, device=device)[None, :] < n_planes[:, None])
+    feasible = ((n_ell <= off + 1e-6) | ~valid).all(dim=1)    # region contains the ellipse
+    # the centre counts as covered when it is inside the face *before* the margin: a centre
+    # 2 cm from the map border is on the border strip the margin deliberately excludes
+    centre_ok = ((n_cen <= off + region_margin_m + 1e-6) | ~valid).all(dim=1)
+
     return Polytopes(A=A, b=off, n_planes=n_planes, converged=converged,
                      n_rounds=(n_planes - 8), center=centres,
-                     radius=torch.maximum(a, b), feasible=feasible)
+                     radius=torch.maximum(a, b), feasible=feasible,
+                     centre_ok=centre_ok)
 
 
 # --------------------------------------------------------------------------- #
@@ -547,7 +559,8 @@ def build_polytopes_serial(centres: np.ndarray, a: np.ndarray, b: np.ndarray,
                      n_rounds=torch.cat([p.n_rounds for p in parts]),
                      center=torch.cat([p.center for p in parts]),
                      radius=torch.cat([p.radius for p in parts]),
-                     feasible=torch.cat([p.feasible for p in parts]))
+                     feasible=torch.cat([p.feasible for p in parts]),
+                     centre_ok=torch.cat([p.centre_ok for p in parts]))
 
 
 

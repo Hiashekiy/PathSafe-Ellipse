@@ -119,9 +119,10 @@ $PY ellipsenet/train.py --tag conft3 --resume checkpoints/connctl/best.pt --no-e
 Neural-IRIS 的局部 patch 贪心 + 分离超平面，做了三处改动：方格"近端面"平面、闭式精确
 重叠判定、8 方向种子 + 单一精确循环（循环终止条件即验收）。
 
-可视化：`ellipsenet/visualize_grid.py` 默认把每个预测椭圆的凸安全区域画出来（橙色半透明填充
-= 精确收敛且椭圆自身安全；红色虚线轮廓 = 该椭圆自身压着障碍，几何上不存在无障碍凸区域，故不填充）。
-`per_trajectory.csv` 里新增 `regions` / `regions_ok` 两列。
+可视化：`ellipsenet/visualize_grid.py` 默认把**每个**预测椭圆的凸安全区域画出来（橙色半透明
+填充 = 该区域无障碍且包含椭圆中心；自身碰撞的椭圆得到的是被障碍切紧的区域，而不是被跳过）。
+标题里的 `regions n (full m)` = n 个椭圆都有区域、其中 m 个完整包住椭圆；
+`per_trajectory.csv` 里有 `regions` / `regions_ok` / `regions_full` 三列。
 
 ```bash
 $PY tests/test_polytopes.py                          # 10 组不变量（含速度与并行/串行等价安全）
@@ -129,8 +130,9 @@ $PY scripts/build_convex_regions.py --n 8 --seed 5   # 预测→区域→验收+
 ```
 
 实测（RTX 4070）：端到端 **18.0 ms/轨迹（0.71 ms/椭圆）**；同一地图 256 个椭圆一次批量
-**41 µs/椭圆**；CPU 回退 0.35 ms/椭圆；「可行且椭圆自身安全」的区域 **0 违规**（302 与 202
-两个样本）。原始违规区域 6–9 个，全部属于自身碰撞或越出地图的椭圆（几何上无解）。
+**39 µs/椭圆**；CPU 回退 0.10 ms/椭圆；302 与 202 两个样本上区域**全部收敛且 0 违规**，
+每个区域都包含椭圆中心（302/302），其中 290/302 完整包住椭圆（其余 12 个是自身碰撞的椭圆，
+区域被障碍切紧）。
 `window_margin_m` 是区域大小/速度的旋钮。
 
 ## 已知局限

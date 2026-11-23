@@ -90,9 +90,14 @@ def collect(model, loader, device, regions: bool = True,
                 "gt_theta": gt_th[i, :n], "gt_valid": gt_v[i, :n],
                 "regions": ([polygon_from_halfspaces(*polys.planes(k)) for k in range(n)]
                             if polys is not None else None),
+                # a region is drawable when it is obstacle free and still anchored on the
+                # ellipse centre; "regions_full" only says it also contains the whole ellipse
                 "regions_ok": (np.logical_and(polys.converged.cpu().numpy(),
-                                               polys.feasible.cpu().numpy())
+                                               polys.centre_ok.cpu().numpy())
                                 if polys is not None else None),
+                "regions_full": (np.logical_and(polys.converged.cpu().numpy(),
+                                                 polys.feasible.cpu().numpy())
+                                  if polys is not None else None),
                 "safe": ex["safe"],
                 "pair_ok": ex["pair_ok"],
                 "pair_cover": ex["pair_cover"],
@@ -117,21 +122,24 @@ def draw_panel(ax, row: Dict[str, object], mode: str, idx: int,
     ax.plot(path[:, 0], path[:, 1], "-", color="tab:blue", lw=1.1, zorder=4)
     if mode == "pred":
         regs = row.get("regions")
+        n_noreg = 0
         if regs:
             for i, poly in enumerate(regs):
+                if not bool(row["regions_ok"][i]):
+                    # the ellipse itself collides, so no obstacle-free convex region exists.
+                    # Drawing the half-built polytope here would be a meaningless giant box;
+                    # mark the ellipse instead and let the title count them.
+                    n_noreg += 1
+                    c = row["center"][i]
+                    ax.plot([c[0]], [c[1]], "x", color="tab:red", ms=2.6, mew=0.6,
+                            zorder=6)
+                    continue
                 if len(poly) < 3:
                     continue
-                ok = bool(row["regions_ok"][i])
-                if ok:
-                    ax.fill(poly[:, 0], poly[:, 1], color="tab:orange", alpha=0.13,
-                            lw=0, zorder=2)
-                    ax.plot(np.r_[poly[:, 0], poly[0, 0]], np.r_[poly[:, 1], poly[0, 1]],
-                            "-", color="tab:orange", lw=0.45, alpha=0.8, zorder=2)
-                else:
-                    # the ellipse itself collides, so no obstacle-free region exists:
-                    # outline only, never fill (a fill here would look like a bug)
-                    ax.plot(np.r_[poly[:, 0], poly[0, 0]], np.r_[poly[:, 1], poly[0, 1]],
-                            "--", color="tab:red", lw=0.4, alpha=0.7, zorder=2)
+                ax.fill(poly[:, 0], poly[:, 1], color="tab:orange", alpha=0.13,
+                        lw=0, zorder=2)
+                ax.plot(np.r_[poly[:, 0], poly[0, 0]], np.r_[poly[:, 1], poly[0, 1]],
+                        "-", color="tab:orange", lw=0.45, alpha=0.8, zorder=2)
         for i in range(row["n_points"]):
             x, y = ellipse_xy(row["center"][i], row["a"][i], row["b"][i], row["theta"][i])
             ax.plot(x, y, "-", lw=0.7,
@@ -141,8 +149,11 @@ def draw_panel(ax, row: Dict[str, object], mode: str, idx: int,
         if titles:
             safe = float(np.mean(row["safe"]))
             cover = np.mean(row["pair_cover"]) if len(row["pair_cover"]) else 0.0
+            nreg = (row["n_points"] - n_noreg) if regs else 0
+            nfull = int(np.sum(row["regions_full"])) if regs else 0
             ax.set_title(f"{idx:02d} {row['scene_id'][:18]}\n"
-                         f"safe {safe:.2f} | cover {cover:.2f} | N={row['n_points']}",
+                         f"safe {safe:.2f} | cover {cover:.2f} | N={row['n_points']}"
+                         + (f" | regions {nreg} (full {nfull})" if regs else ""),
                          fontsize=6.0, pad=2.0)
     else:
         v = row["gt_valid"]
@@ -254,7 +265,8 @@ def main() -> int:
         wr.writerow(["idx", "scene_id", "file", "n_points", "resolution_m",
                      "exact_safe_rate", "collision_rate", "midpoint_continuity",
                      "boundary_cover", "corridor_success", "border_violation",
-                     "area_p50_m2", "p_max_mean", "regions", "regions_ok"])
+                     "area_p50_m2", "p_max_mean", "regions", "regions_ok",
+                     "regions_full"])
         for k, r in enumerate(rows):
             wr.writerow([k, r["scene_id"], r["file"], r["n_points"], f"{r['resolution_m']:.4f}",
                          f"{np.mean(r['safe']):.4f}", f"{1 - np.mean(r['safe']):.4f}",
@@ -264,7 +276,8 @@ def main() -> int:
                          f"{np.median(np.pi * r['a'] * r['b']):.1f}",
                          f"{np.mean(r['prob']):.3f}",
                          len(r["regions"]) if r["regions"] else 0,
-                         int(np.sum(r["regions_ok"])) if r["regions"] else 0])
+                         int(np.sum(r["regions_ok"])) if r["regions"] else 0,
+                         int(np.sum(r["regions_full"])) if r["regions"] else 0])
 
     # summary figure: per-trajectory distributions
     safe = np.array([np.mean(r["safe"]) for r in rows])

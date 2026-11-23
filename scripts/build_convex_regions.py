@@ -130,7 +130,8 @@ def main() -> int:
         # expected to sit inside an obstacle-free region
         viol_feasible_safe = 0
         areas = [polytope_area(*polys.planes(i)) for i in range(len(cen))]
-        # an ellipse that itself collides cannot be contained in an obstacle-free region
+        # every ellipse gets a region; the ones that themselves collide simply end up with a
+        # tighter region (it still contains their centre and no obstacle)
         occ_np = np.asarray(blocked).astype(np.uint8)
         safe_mask = []
         for i in range(len(cen)):
@@ -162,7 +163,8 @@ def main() -> int:
                                 n_planes=torch.tensor([k]), converged=torch.tensor([True]),
                                 n_rounds=torch.tensor([k]), center=polys.center[i:i + 1].cpu(),
                                 radius=polys.radius[i:i + 1].cpu(),
-                                feasible=polys.feasible[i:i + 1].cpu())
+                                feasible=polys.feasible[i:i + 1].cpu(),
+                                centre_ok=polys.centre_ok[i:i + 1].cpu())
             if verify_polytopes(single, dev_blocked.cpu(), res)["violating_regions"] > 0:
                 viol_feasible_safe += 1
             max_overrun = max(max_overrun, overrun)
@@ -189,6 +191,7 @@ def main() -> int:
             "violating_regions": rep["violating_regions"],
             "violating_regions_feasible_safe": viol_feasible_safe,
             "ellipse_inside_when_safe": bool(ell_inside),
+            "centres_covered": bool(polys.centre_ok.all()),
             "ellipse_overrun_max_m": round(max_overrun, 4),
             "n_checked_ellipses": int(n_checked),
             "n_skipped_ellipses": int(len(cen) - n_checked),
@@ -236,6 +239,7 @@ def main() -> int:
         "violating_regions": int(sum(r["violating_regions"] for r in rows)),
         "violating_regions_feasible_safe": int(sum(r["violating_regions_feasible_safe"] for r in rows)),
         "ellipse_inside_all_safe": all(r["ellipse_inside_when_safe"] for r in rows),
+        "centres_covered": all(bool(r["centres_covered"]) for r in rows),
         "ellipse_overrun_max_m": round(max(r["ellipse_overrun_max_m"] for r in rows), 4),
         "ellipse_inside_tolerance": round(2 * args.region_margin, 4),
         "n_checked_ellipses": int(sum(r["n_checked_ellipses"] for r in rows)),
