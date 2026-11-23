@@ -35,6 +35,9 @@ class GeometricLoss(nn.Module):
         self.w_safe = float(lc["w_safe"])
         self.w_area = float(lc["w_area"])
         self.w_conn = float(lc["w_conn"])
+        self.w_span = float(lc.get("w_span", 0.0))
+        self.w_smooth = float(lc.get("w_smooth", 0.0))
+        self.span_rho_target = float(lc.get("span_rho_target", 0.85))
         self.d_max = float(lc["d_max_m"])
         self.d_margin = float(lc["d_margin_m"])
         self.area_eps = float(lc.get("area_eps", 1e-6))
@@ -43,6 +46,8 @@ class GeometricLoss(nn.Module):
         self.s_safe = float(scales.get("safe", 1.0))
         self.s_area = float(scales.get("area", 1.0))
         self.s_conn = float(scales.get("conn", 1.0))
+        self.s_span = float(scales.get("span", 1.0))
+        self.s_smooth = float(scales.get("smooth", 1.0))
         self.register_buffer(
             "safe_template",
             unit_ellipse_template(mc["ellipse_samples_radii"], mc["ellipse_samples_counts"]),
@@ -98,6 +103,57 @@ class GeometricLoss(nn.Module):
         pen_prev = torch.clamp(rho_prev - 1.0, min=0.0).pow(2).mean(dim=-1)
         return pen_next + pen_prev
 
+    def span_terms(self, out: Dict, batch: Dict):
+        """Arc-gap coverage: ``(pen_prev, pen_next)``, each ``(B,N-1,R)``.
+
+        The midpoint of two consecutive stations must lie *well* inside both selected
+        ellipses (plan 10.4: "路径点间距不同的情况应按实际弧长间隔调整连接要求").
+
+        The boundary-sample term above is a *distance* penalty (zero gradient at
+        ``rho = 1``), so it cannot remove small gaps; this term uses the generator's
+        own continuity criterion ``rho <= rho_target (0.85)`` evaluated at the chord
+        midpoint, which is also the reported "midpoint continuity" metric.
+        ``pen_prev`` is indexed by the candidate at point ``i`` and ``pen_next`` by the
+        candidate at ``i+1``, so the 16x16 joint expectation collapses exactly into two
+        probability-weighted 16-vectors (no approximation).
+        """
+        path = batch["path_xy"]
+        q = out["q"]
+        a, b, theta = out["a"], out["b"], out["theta"]
+        mid = 0.5 * (path[:, :-1] + path[:, 1:])                       # (B,N-1,2)
+        x = mid[:, :, None, None, :]                                   # (B,N-1,1,1,2)
+        cen_p = q[:, :-1][:, :, None, :]                               # (B,N-1,1,R,2)
+        rho_p = quadratic_form(x, cen_p, a[:, :-1][:, :, None, None],
+                               b[:, :-1][:, :, None, None],
+                               theta[:, :-1][:, :, None, None]).squeeze(2)   # (B,N-1,R)
+        cen_n = q[:, 1:][:, :, None, :]
+        rho_n = quadratic_form(x, cen_n, a[:, 1:][:, :, None, None],
+                               b[:, 1:][:, :, None, None],
+                               theta[:, 1:][:, :, None, None]).squeeze(2)
+        pen_p = torch.clamp(rho_p - self.span_rho_target, min=0.0).pow(2)
+        pen_n = torch.clamp(rho_n - self.span_rho_target, min=0.0).pow(2)
+        return pen_p, pen_n
+
+    def offset_smooth_terms(self, out: Dict, batch: Dict) -> torch.Tensor:
+        """Adjacent-station offset coherence, ``(B,N-1)``.
+
+        ``Delta_i = q_i - p_i`` is the probability-weighted lateral/forward shift the
+        network chose at station ``i``.  Two neighbouring ellipses keep a continuous
+        corridor only if their shifts are similar -- the measured failure mode is
+        neighbouring stations choosing *opposite* rays, which tears the chain apart and
+        (measured) cannot be repaired by the arc-gap term without shrinking the
+        clearance.  This term penalises ``||Delta_i - Delta_{i+1}||^2`` and therefore
+        acts on the direction distribution and the ratio only; it never rewards a
+        bigger ellipse, so it does not trade safety away.
+
+        Uses the A* path (input) and the prediction only -- no labels.
+        """
+        path = batch["path_xy"]
+        delta = out["q"] - path[:, :, None, :]                         # (B,N,R,2)
+        mbar = (out["pi"][..., None] * delta).sum(dim=2)               # (B,N,2)
+        d = mbar[:, 1:] - mbar[:, :-1]
+        return (d * d).sum(dim=-1)
+
     # -------------------------------------------------------------- full loss
     def forward(self, out: Dict, batch: Dict) -> Tuple[torch.Tensor, Dict[str, float]]:
         mask = batch["mask"]                                           # (B,N) bool
@@ -118,7 +174,16 @@ class GeometricLoss(nn.Module):
         pair_mask = (mask[:, :-1] & mask[:, 1:]).to(l_conn_pt.dtype)
         l_conn = (l_conn_pt * pair_mask).sum() / pair_mask.sum().clamp_min(1.0)
 
-        total = l_choice + self.w_conn * l_conn / self.s_conn
+        pen_p, pen_n = self.span_terms(out, batch)                      # (B,N-1,R) each
+        l_span_pt = ((pi[:, :-1] * pen_p).sum(-1) + (pi[:, 1:] * pen_n).sum(-1))
+        l_span = (l_span_pt * pair_mask).sum() / pair_mask.sum().clamp_min(1.0)
+
+        l_smooth_pt = self.offset_smooth_terms(out, batch)              # (B,N-1)
+        l_smooth = (l_smooth_pt * pair_mask).sum() / pair_mask.sum().clamp_min(1.0)
+
+        total = (l_choice + self.w_conn * l_conn / self.s_conn
+                 + self.w_span * l_span / self.s_span
+                 + self.w_smooth * l_smooth / self.s_smooth)
 
         with torch.no_grad():
             ent = -(pi.clamp_min(1e-9).log() * pi).sum(dim=-1)         # (B,N)
@@ -127,6 +192,8 @@ class GeometricLoss(nn.Module):
                 "total": float(total.detach()),
                 "choice": float(l_choice.detach()),
                 "conn": float(l_conn.detach()),
+                "span": float(l_span.detach()),
+                "smooth": float(l_smooth.detach()),
                 # raw magnitudes (plan 10.7) - never used for gradients
                 "raw_dist": float((-(terms["dist"]) * m[:, :, None]).sum()
                                   / (m.sum() * pi.shape[-1]).clamp_min(1.0)),
@@ -135,6 +202,8 @@ class GeometricLoss(nn.Module):
                 "raw_area": float((terms["area"] * m).sum() / denom),
                 "raw_conn": float((l_conn_pt * pair_mask).sum()
                                   / pair_mask.sum().clamp_min(1.0)),
+                "raw_span": float(l_span.detach()),
+                "raw_smooth": float(l_smooth.detach()),
                 "s_center_mean": float((terms["s_center"] * m[:, :, None]).sum()
                                        / (m.sum() * pi.shape[-1]).clamp_min(1.0)),
                 "area_mean": float((terms["area_m2"] * m).sum() / denom),

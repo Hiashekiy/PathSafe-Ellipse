@@ -34,8 +34,8 @@ from psen_v3.evaluation.runner import run_evaluation  # noqa: E402
 from psen_v3.geometry.losses import GeometricLoss  # noqa: E402
 from psen_v3.models.psenet import PSENet, count_parameters  # noqa: E402
 
-LOG_COLUMNS = ["step", "epoch", "lr", "tau", "total", "choice", "conn", "raw_dist",
-               "raw_safe", "raw_area", "raw_conn", "s_center_mean", "area_mean",
+LOG_COLUMNS = ["step", "epoch", "lr", "tau", "total", "choice", "conn", "span", "raw_dist",
+               "raw_safe", "raw_area", "raw_conn", "raw_span", "s_center_mean", "area_mean",
                "pi_entropy", "pi_max"]
 
 
@@ -116,6 +116,8 @@ def main() -> int:
     ap.add_argument("--eval-overfit", action="store_true",
                     help="evaluate on the overfit trajectories instead of the val split")
     ap.add_argument("--resume", default="", help="checkpoint to continue from")
+    ap.add_argument("--no-epoch-carry", action="store_true",
+                    help="with --resume: restart the epoch counter / LR cycle at 0")
     ap.add_argument("--patience", type=int, default=0,
                     help="epochs without validation improvement before stopping (0 = off)")
     ap.add_argument("--snapshot-every", type=int, default=0,
@@ -211,7 +213,7 @@ def main() -> int:
     if args.resume:
         ck = torch.load(args.resume, map_location=device, weights_only=False)
         model.load_state_dict(ck["model"])
-        start_epoch = int(ck.get("epoch", -1)) + 1
+        start_epoch = 0 if args.no_epoch_carry else int(ck.get("epoch", -1)) + 1
         print(f"resumed from {args.resume} at epoch {start_epoch}", flush=True)
     with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2, ensure_ascii=False)
@@ -283,6 +285,7 @@ def main() -> int:
                 print(f"[{el:6.1f}m] ep {epoch} step {step}/{total_steps} lr {lr:.2e} "
                       f"tau {tau:.2f} | total {mean['total']:.3f} "
                       f"choice {mean['choice']:.3f} conn {mean['conn']:.2f} "
+                      f"span {mean.get('span', float('nan')):.3f} "
                       f"| raw d {mean['raw_dist']:.2f} s {mean['raw_safe']:.3f} "
                       f"a {mean['raw_area']:.2f} c {mean['raw_conn']:.2f} "
                       f"| S(q) {mean['s_center_mean']:.2f} area {mean['area_mean']:.2f} "

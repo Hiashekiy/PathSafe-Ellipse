@@ -1,0 +1,25 @@
+{
+  "split": "val",
+  "n_trajectories": 200,
+  "boundary_cover_rate": {
+    "cover_mean": 0.4294668079096045,
+    "cover_p10": 0.375,
+    "cover_p50": 0.4375,
+    "cover_p90": 0.46875,
+    "cover_p95": 0.46875,
+    "cover_n": 5310
+  },
+  "boundary_cover_pair_pass_gt_0.9": 0.0,
+  "midpoint_continuity": 1.0,
+  "corridor_success_rate": 1.0,
+  "exact_safe_rate": 1.0,
+  "ellipse_area_m2": {
+    "mean": 48.03548399591043,
+    "p10": 3.2289223530491795,
+    "p50": 28.706604267324764,
+    "p90": 113.09733552923255,
+    "p95": 113.09733552923255,
+    "n": 5528
+  },
+  "path_spacing_m": null
+}

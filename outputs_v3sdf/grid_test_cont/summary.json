@@ -1,0 +1,13 @@
+{
+  "checkpoint": "D:\\ProjectDirectory\\PathSafe-Ellipse\\runs_v3sdf\\conft3\\best.pt",
+  "split": "test",
+  "n_trajectories": 24,
+  "n_points": 644,
+  "exact_safe_rate_per_point": 0.9503105590062112,
+  "exact_safe_rate_per_trajectory": 0.9661278001988464,
+  "trajectories_fully_safe": 0.5833333333333334,
+  "corridor_success_rate": 0.5416666666666666,
+  "midpoint_continuity": 0.9915178699403738,
+  "boundary_cover": 0.4468519123056695,
+  "area_p50_m2": 103.80880737304688
+}
