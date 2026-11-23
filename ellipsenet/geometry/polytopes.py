@@ -476,6 +476,35 @@ def verify_polytopes(polys: Polytopes, blocked: torch.Tensor, resolution_m: floa
             "violating_cells": float(bad_cells)}
 
 
+def polygon_from_halfspaces(A: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Vertices of ``{A x <= b}`` in counter-clockwise order (for plotting / clipping).
+
+    Every vertex of a bounded 2-D polytope is the intersection of two of its faces, so
+    the corner list is "all feasible pairwise intersections" and their convex hull.
+    Returns ``(0, 2)`` when the region is empty or degenerate.
+    """
+    from scipy.spatial import ConvexHull
+
+    n = A.shape[0]
+    pts = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            M = np.stack([A[i], A[j]])
+            if abs(np.linalg.det(M)) < 1e-9:
+                continue
+            p = np.linalg.solve(M, np.array([b[i], b[j]]))
+            if np.all(A @ p <= b + 1e-6):
+                pts.append(p)
+    if len(pts) < 3:
+        return np.empty((0, 2))
+    pts = np.asarray(pts)
+    try:
+        hull = ConvexHull(pts)
+    except Exception:                      # collinear / duplicate corners
+        return np.empty((0, 2))
+    return pts[hull.vertices]
+
+
 def polytope_area(A: np.ndarray, b: np.ndarray) -> float:
     """Area of ``{A x <= b}`` via the convex hull of feasible plane intersections."""
     from scipy.spatial import ConvexHull

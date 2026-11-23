@@ -26,6 +26,8 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from ellipsenet.data.dataset import build_loader, load_index, split_by_group  # noqa: E402
 from ellipsenet.evaluation.metrics import exact_trajectory  # noqa: E402
+from ellipsenet.geometry.polytopes import (build_polytopes,  # noqa: E402
+                                           polygon_from_halfspaces)
 from ellipsenet.models.psenet import PSENet  # noqa: E402
 
 
@@ -37,7 +39,8 @@ def ellipse_xy(c, a, b, theta, m=72):
 
 
 @torch.no_grad()
-def collect(model, loader, device) -> List[Dict[str, object]]:
+def collect(model, loader, device, regions: bool = True,
+            window_margin: float = 3.0) -> List[Dict[str, object]]:
     out_rows: List[Dict[str, object]] = []
     for batch in loader:
         b = {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in batch.items()}
@@ -63,6 +66,16 @@ def collect(model, loader, device) -> List[Dict[str, object]]:
             ex = exact_trajectory(center[i, :n], a[i, :n], bb[i, :n], th[i, :n],
                                   occ[i].astype(np.uint8), float(res[i]),
                                   rho_max=0.85)
+            # convex safe region per predicted ellipse (one batched call per trajectory)
+            polys = None
+            if regions:
+                polys = build_polytopes(
+                    torch.as_tensor(center[i, :n], device=device),
+                    torch.as_tensor(a[i, :n], device=device),
+                    torch.as_tensor(bb[i, :n], device=device),
+                    torch.as_tensor(th[i, :n], device=device),
+                    torch.as_tensor(occ[i], device=device), float(res[i]),
+                    window_margin_m=window_margin)
             out_rows.append({
                 "scene_id": batch["meta"]["scene_id"][i],
                 "file": batch["meta"]["file"][i],
@@ -75,6 +88,11 @@ def collect(model, loader, device) -> List[Dict[str, object]]:
                 "prob": prob[i, :n],
                 "gt_center": gt_c[i, :n], "gt_ab": gt_ab[i, :n],
                 "gt_theta": gt_th[i, :n], "gt_valid": gt_v[i, :n],
+                "regions": ([polygon_from_halfspaces(*polys.planes(k)) for k in range(n)]
+                            if polys is not None else None),
+                "regions_ok": (np.logical_and(polys.converged.cpu().numpy(),
+                                               polys.feasible.cpu().numpy())
+                                if polys is not None else None),
                 "safe": ex["safe"],
                 "pair_ok": ex["pair_ok"],
                 "pair_cover": ex["pair_cover"],
@@ -98,6 +116,22 @@ def draw_panel(ax, row: Dict[str, object], mode: str, idx: int,
     path = row["path"]
     ax.plot(path[:, 0], path[:, 1], "-", color="tab:blue", lw=1.1, zorder=4)
     if mode == "pred":
+        regs = row.get("regions")
+        if regs:
+            for i, poly in enumerate(regs):
+                if len(poly) < 3:
+                    continue
+                ok = bool(row["regions_ok"][i])
+                if ok:
+                    ax.fill(poly[:, 0], poly[:, 1], color="tab:orange", alpha=0.13,
+                            lw=0, zorder=2)
+                    ax.plot(np.r_[poly[:, 0], poly[0, 0]], np.r_[poly[:, 1], poly[0, 1]],
+                            "-", color="tab:orange", lw=0.45, alpha=0.8, zorder=2)
+                else:
+                    # the ellipse itself collides, so no obstacle-free region exists:
+                    # outline only, never fill (a fill here would look like a bug)
+                    ax.plot(np.r_[poly[:, 0], poly[0, 0]], np.r_[poly[:, 1], poly[0, 1]],
+                            "--", color="tab:red", lw=0.4, alpha=0.7, zorder=2)
         for i in range(row["n_points"]):
             x, y = ellipse_xy(row["center"][i], row["a"][i], row["b"][i], row["theta"][i])
             ax.plot(x, y, "-", lw=0.7,
@@ -107,9 +141,9 @@ def draw_panel(ax, row: Dict[str, object], mode: str, idx: int,
         if titles:
             safe = float(np.mean(row["safe"]))
             cover = np.mean(row["pair_cover"]) if len(row["pair_cover"]) else 0.0
-            ax.set_title(f"{idx:02d} {row['scene_id'][:24]}\n"
+            ax.set_title(f"{idx:02d} {row['scene_id'][:18]}\n"
                          f"safe {safe:.2f} | cover {cover:.2f} | N={row['n_points']}",
-                         fontsize=6.5)
+                         fontsize=6.0, pad=2.0)
     else:
         v = row["gt_valid"]
         for i in range(row["n_points"]):
@@ -145,6 +179,10 @@ def main() -> int:
     ap.add_argument("--no-titles", action="store_true", help="no text at all")
     ap.add_argument("--big", type=int, default=3,
                     help="how many large clean single-trajectory figures to write")
+    ap.add_argument("--no-regions", action="store_true",
+                    help="skip the convex safe regions (ellipses only)")
+    ap.add_argument("--window-margin", type=float, default=3.0,
+                    help="region cap beyond the ellipse semi-major axis [m]")
     args = ap.parse_args()
 
     import matplotlib
@@ -168,7 +206,8 @@ def main() -> int:
     loader = build_loader([entries[i] for i in pick], cfg["data"]["trajectory_dir"],
                           cfg["data"]["sdf_dir"], args.batch_size, cfg,
                           augment=False, shuffle=False)
-    rows = collect(model, loader, device)
+    rows = collect(model, loader, device, regions=not args.no_regions,
+                   window_margin=args.window_margin)
     os.makedirs(args.out_dir, exist_ok=True)
 
     n = len(rows)
@@ -190,12 +229,14 @@ def main() -> int:
             else:
                 ax.axis("off")
         if not args.no_titles:
+            extra = (f" | regions: window +{args.window_margin:g} m"
+                     if (mode == "pred" and not args.no_regions) else "")
             fig.suptitle(f"{os.path.basename(os.path.dirname(os.path.abspath(args.checkpoint)))}"
                          f" | split {args.split} | {n} trajectories | "
-                         f"{'prediction' if mode == 'pred' else 'GT reference (diagnostic only)'}",
-                         fontsize=11)
-        fig.subplots_adjust(left=0.005, right=0.995, top=0.985, bottom=0.005,
-                            wspace=0.02, hspace=0.02)
+                         f"{'prediction + convex safe regions' if mode == 'pred' else 'GT reference (diagnostic only)'}"
+                         + extra, fontsize=11, y=0.995)
+        fig.subplots_adjust(left=0.005, right=0.995, top=0.955, bottom=0.005,
+                            wspace=0.03, hspace=0.16)
         fig.savefig(os.path.join(args.out_dir, name), dpi=130)
         plt.close(fig)
 
@@ -213,7 +254,7 @@ def main() -> int:
         wr.writerow(["idx", "scene_id", "file", "n_points", "resolution_m",
                      "exact_safe_rate", "collision_rate", "midpoint_continuity",
                      "boundary_cover", "corridor_success", "border_violation",
-                     "area_p50_m2", "p_max_mean"])
+                     "area_p50_m2", "p_max_mean", "regions", "regions_ok"])
         for k, r in enumerate(rows):
             wr.writerow([k, r["scene_id"], r["file"], r["n_points"], f"{r['resolution_m']:.4f}",
                          f"{np.mean(r['safe']):.4f}", f"{1 - np.mean(r['safe']):.4f}",
@@ -221,7 +262,9 @@ def main() -> int:
                          f"{np.mean(r['pair_cover']) if len(r['pair_cover']) else float('nan'):.4f}",
                          int(r["corridor_ok"]), f"{np.mean(r['border']):.4f}",
                          f"{np.median(np.pi * r['a'] * r['b']):.1f}",
-                         f"{np.mean(r['prob']):.3f}"])
+                         f"{np.mean(r['prob']):.3f}",
+                         len(r["regions"]) if r["regions"] else 0,
+                         int(np.sum(r["regions_ok"])) if r["regions"] else 0])
 
     # summary figure: per-trajectory distributions
     safe = np.array([np.mean(r["safe"]) for r in rows])

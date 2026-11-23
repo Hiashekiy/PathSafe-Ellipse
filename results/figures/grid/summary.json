@@ -1,5 +1,5 @@
 {
-  "checkpoint": "D:\\ProjectDirectory\\PathSafe-Ellipse\\runs_v3sdf\\conft3\\best.pt",
+  "checkpoint": "D:\\ProjectDirectory\\PathSafe-Ellipse\\checkpoints\\v3_best.pt",
   "split": "test",
   "n_trajectories": 24,
   "n_points": 644,

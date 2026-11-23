@@ -22,7 +22,7 @@
 | 单条轨迹推理耗时（batch 1，RTX 4070） | **10.9 ms**（模型 8.4 ms；同场景复用地图特征 2.8 ms） |
 
 定性与定量对比：`results/figures/predictions/`（6 条预测/GT 对照 + 16 候选放大）、
-`results/figures/grid/`（24 条轨迹网格，含纯白底版）、`results/figures/curves/`（损失曲线与指标表）。
+`results/figures/grid/`（24 条轨迹网格，含安全凸区域与纯白底版）、`results/figures/polytopes/`（区域放大图）、`results/figures/curves/`（损失曲线与指标表）。
 
 ## 目录
 
@@ -78,7 +78,9 @@ $PY ellipsenet/evaluate.py --checkpoint checkpoints/v3_best.pt --split test
 $PY ellipsenet/visualize.py --checkpoint checkpoints/v3_best.pt --split test --n 6 \
     --seed 7 --candidate-figs 2 --out-dir results/figures/predictions
 $PY ellipsenet/visualize_grid.py --checkpoint checkpoints/v3_best.pt --split test \
-    --n 24 --seed 11 --cols 6 --plain --no-titles --big 3 --out-dir results/figures/grid
+    --n 24 --seed 11 --cols 6 --big 3 --out-dir results/figures/grid      # 椭圆 + 凸区域
+$PY ellipsenet/visualize_grid.py ... --no-regions                        # 只画椭圆
+$PY ellipsenet/visualize_grid.py ... --plain --no-titles                 # 白底无文字版
 
 # 推理时延基准（batch 1）
 $PY scripts/bench_inference.py --checkpoint checkpoints/v3_best.pt --iters 50
@@ -116,6 +118,10 @@ $PY ellipsenet/train.py --tag conft3 --resume checkpoints/connctl/best.pt --no-e
 `ellipsenet/geometry/polytopes.py` 把每个预测椭圆吹成凸多面体（半空间交）。方法借鉴
 Neural-IRIS 的局部 patch 贪心 + 分离超平面，做了三处改动：方格"近端面"平面、闭式精确
 重叠判定、8 方向种子 + 单一精确循环（循环终止条件即验收）。
+
+可视化：`ellipsenet/visualize_grid.py` 默认把每个预测椭圆的凸安全区域画出来（橙色半透明填充
+= 精确收敛且椭圆自身安全；红色虚线轮廓 = 该椭圆自身压着障碍，几何上不存在无障碍凸区域，故不填充）。
+`per_trajectory.csv` 里新增 `regions` / `regions_ok` 两列。
 
 ```bash
 $PY tests/test_polytopes.py                          # 10 组不变量（含速度与并行/串行等价安全）
