@@ -203,6 +203,11 @@ def main() -> int:
     t0 = time.perf_counter()
     for epoch in range(start_epoch, epochs):
         model.train()
+        # reshuffle the scene-grouped order every epoch, otherwise a second pass
+        # replays exactly the same batches (flips are scene-stable by design)
+        sampler = getattr(train_loader, "batch_sampler", None)
+        if sampler is not None and hasattr(sampler, "set_epoch"):
+            sampler.set_epoch(epoch)
         running: Dict[str, List[float]] = {}
         for it, batch in enumerate(train_loader):
             if args.max_steps and it >= args.max_steps:
