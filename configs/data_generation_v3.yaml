@@ -1,0 +1,116 @@
+# ---------------------------------------------------------------------------
+# PathSafe-Ellipse V3 config -- trajectory-level sampling.
+#
+# Geometry (A*, centre-line optimisation, ellipse solver) is identical to V2.1;
+# only the sampling unit changes: ONE NPZ == ONE complete trajectory.
+#
+#   occupancy  256x256  = scene.blocked (raw obstacles + robot safety inflation)
+#   path_xy    (N,2)    = resampled A* path  (every station is a query point)
+#   lidar      (N,16)   = cast from path_xy[i] on scene.blocked
+#   labels     (N,..)   = ellipse at centerline_xy[i]
+#
+# Output directories are isolated from V2 / V2.1 (data/processed_v3).
+# ---------------------------------------------------------------------------
+project:
+  name: PathSafe-Ellipse-V3
+  random_seed: 42
+  label_version: v3
+
+paths:
+  map_dir: ./data/street-map
+  v3_root: ./data/processed_v3
+  trajectory_dir: ./data/processed_v3/trajectories
+  report_dir: ./reports_v3
+  viz_dir: ./outputs_v3
+
+scene:
+  size: 256
+  physical_fields_m: [48.0, 64.0, 80.0]
+  source_resolution: auto
+  max_scenes: null
+
+robot:
+  radius_m: 0.25
+  safety_margin_m: 0.04
+  edt_upsample: 4
+
+path:
+  paths_per_scene: 3
+  max_attempts: 60
+  min_start_goal_ratio: 0.20
+  max_start_goal_ratio: 0.75
+  min_path_length_m: 8.0
+  start_goal_overlap_m: 1.5
+
+# adaptive A* resampling; its output IS the query-point set of a trajectory
+resample:
+  spacing_normal_m: 1.25
+  spacing_narrow_m: 0.75
+  spacing_open_m: 2.0
+  narrow_clearance_m: 1.0
+  open_clearance_m: 2.5
+  curvature_open_deg: 10.0
+
+centerline:
+  method: route_constrained_clearance
+  r_max_m: 3.0
+  nonlocal_min_index_gap: 4
+  station_tangent_limit_ratio: 0.25
+  numeric_margin_m: 0.01
+  station_projection_window: 3
+  station_order_eps_m: 1.0e-6
+  min_blend_alpha: 0.05            # d_safe = 0.25 + 0.04 + 0.01 = 0.30 m
+
+  w_clear: 1.0
+  w_smooth: 0.15
+  w_pull: 0.02
+  clearance_cap_m: 6.0
+
+  max_iter: 200
+  ftol: 1.0e-9
+  constraint_tol: 1.0e-5
+
+  multi_start: true
+  multi_start_count: 1
+  init_offsets_m: [0.5, 1.0]
+
+  max_optimised_stations: 32
+  segment_collocation_points: 2
+  legacy_segment_check_step_cells: 0.25
+  legacy_homotopy_check_step_cells: 0.25
+  segment_check_step_cells: 0.05
+  homotopy_check_step_cells: 0.05
+  homotopy_max_disp_cells: 0.05
+
+  # legacy V2 keys (only used when method: legacy_weighted)
+  end_ramp_m: 1.0
+  clear_min_m: 0.30
+  clearance_penalty: 50.0
+  radius_penalty: 200.0
+
+ellipse:
+  r_init_max_m: 0.5
+  r_axis_max_m: 6.0
+  min_eig_m2: 1.0e-6
+  epsilon_m: 0.01
+  sectors: 32
+  active_target: 32
+  active_hard_limit: 48
+  direction_candidates: 12
+  max_outer_rounds: 3
+  area_change_tol: 0.01
+  solver: barrier
+  verify_samples_cvxpy: 32
+
+# continuity now covers EVERY adjacent query-point pair of the final trajectory
+continuity:
+  rho_max: 0.85
+  max_insert_per_interval: 2      # midpoint splits per interval (path and centre line together)
+  max_points_factor: 2.5          # hard cap on inserted points: N <= factor * N_astar
+
+lidar:
+  ray_count: 16
+  max_range_m: 9.0
+
+runtime:
+  log_level: INFO

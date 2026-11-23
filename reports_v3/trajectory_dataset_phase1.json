@@ -1,0 +1,146 @@
+{
+  "tag": "phase1",
+  "label_version": "v3",
+  "git_commit": "197b161",
+  "config": "D:\\ProjectDirectory\\PathSafe-Ellipse\\configs\\data_generation_v3.yaml",
+  "trajectory_dir": "D:\\ProjectDirectory\\PathSafe-Ellipse\\data\\processed_v3\\trajectories\\phase1",
+  "index": "D:\\ProjectDirectory\\PathSafe-Ellipse\\data\\processed_v3\\trajectories\\phase1\\index.json",
+  "timing": {
+    "total_s": 1.4440430999966338,
+    "per_trajectory_s": 1.4440430999966338
+  },
+  "statistics": {
+    "n_files": 1,
+    "n_scenes": 1,
+    "n_map_groups": 1,
+    "n_trajectories": 1,
+    "n_query_points": 36,
+    "points_per_trajectory": {
+      "mean": 36.0,
+      "p05": 36.0,
+      "p50": 36.0,
+      "p95": 36.0,
+      "min": 36.0,
+      "max": 36.0
+    },
+    "label_valid_rate": 1.0,
+    "safety_verified_rate": 1.0,
+    "continuity_verified_rate": 1.0,
+    "ellipse_area": {
+      "mean": 22.596075656712674,
+      "p05": 8.246020779002327,
+      "p50": 12.576817296420604,
+      "p95": 65.89874285726475,
+      "min": 5.551028662878887,
+      "max": 80.12413260918093
+    },
+    "semi_major_a": {
+      "mean": 3.2775920556869003,
+      "p05": 2.0747708490307835,
+      "p50": 2.736157850398297,
+      "p95": 5.999999999999956,
+      "min": 1.805568226902717,
+      "max": 5.999999999999969
+    },
+    "semi_minor_b": {
+      "mean": 1.8618979150179422,
+      "p05": 1.2205183611407566,
+      "p50": 1.4059770667204565,
+      "p95": 3.4960368897584932,
+      "min": 0.9786100993341974,
+      "max": 4.250719066639949
+    },
+    "center_offset_norm": {
+      "mean": 1.3650187582865443,
+      "p05": 0.583366530834377,
+      "p50": 1.3416603301642769,
+      "p95": 2.1937511989745997,
+      "min": 0.0,
+      "max": 2.667123395577089
+    },
+    "lidar_range": {
+      "mean": 5.634749132932888,
+      "p05": 0.13258251547813416,
+      "p50": 9.0,
+      "p95": 9.0,
+      "min": 0.09375,
+      "max": 9.0
+    },
+    "lidar_ray_mean": [
+      8.1484375,
+      8.39462215370602,
+      8.70623948176702,
+      9.0,
+      9.0,
+      6.3143324545688095,
+      6.171108427974913,
+      3.897533110032479,
+      4.086468696594238,
+      1.9700865666899416,
+      2.290249646123913,
+      2.5950645891328654,
+      4.40160788430108,
+      4.321032226085663,
+      4.9273374022709,
+      5.931865987678369
+    ],
+    "solver_status_counts": {
+      "optimal": 36
+    }
+  },
+  "checks": {
+    "summary": {
+      "n_files": 1,
+      "n_files_with_problems": 0,
+      "n_query_points": 36,
+      "ellipse_safety_reverified_rate": 1.0,
+      "continuity_pair_pass_rate": 1.0,
+      "path_points_in_blocked_cells": 0,
+      "centerline_points_in_blocked_cells": 0,
+      "lidar_max_abs_err_m": 0.0
+    },
+    "files": [
+      {
+        "file": "Sydney_0_1024_part_1_0_c77_216_f48_k0_path_000.npz",
+        "scene_id": "Sydney_0_1024_part_1_0_c77_216_f48_k0",
+        "map_group": "Sydney_0",
+        "path_id": 0,
+        "n_points": 36,
+        "n_safe": 36,
+        "n_safe_reverified": 36,
+        "n_pairs": 35,
+        "n_pairs_ok": 35,
+        "n_label_valid": 36,
+        "path_blocked_cells": 0,
+        "centerline_blocked_cells": 0,
+        "lidar_max_err_m": 0.0,
+        "problems": []
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "scene_id": "Sydney_0_1024_part_1_0_c77_216_f48_k0",
+      "map_group": "Sydney_0",
+      "field_m": 48.0,
+      "r_scene": 0.1875,
+      "n_trajectories": 1,
+      "scene_ms": 1090.5,
+      "stats": {
+        "n_paths": 1,
+        "n_paths_accepted": 1,
+        "n_paths_failed": 0,
+        "n_trajectories": 1,
+        "n_query_points": 36,
+        "n_ellipse_safe": 36,
+        "n_continuity_verified": 36,
+        "n_both_verified": 36,
+        "n_inserted": 0,
+        "solve_ms_median": 13.356900017242879,
+        "path_label_status": {
+          "optimal_safe": 1
+        }
+      }
+    }
+  ]
+}

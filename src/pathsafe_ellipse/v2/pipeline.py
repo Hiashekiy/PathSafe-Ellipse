@@ -1,7 +1,10 @@
-"""V2 pipeline: scene sampling -> A* -> centreline -> sparse anchors -> ellipse
-labels -> continuity check -> per-scene artefacts.
+"""V3 pipeline: scene sampling -> A* -> centreline -> per-station LiDAR + ellipse
+labels -> continuity check -> one self-contained trajectory block per path.
 
-Nothing here touches the V1 code paths; outputs carry ``label_version = "v2"``.
+V3 changes the *sampling unit* only: a training sample is one full trajectory.
+Every resampled A* station is a query point (no sparse anchor selection, no
+64x64 patch, no clearance feature).  The A*, centre-line and ellipse algorithms
+themselves are untouched.
 """
 from __future__ import annotations
 
@@ -115,6 +118,138 @@ def lidar_ranges(scene: Scene, p_xy: np.ndarray, ray_count: int, max_range_m: fl
 
 
 # --------------------------------------------------------------------------- #
+# One trajectory: every resampled A* station is a query point (V3)
+# --------------------------------------------------------------------------- #
+@dataclass
+class TrajectoryNode:
+    """One query point: A* station ``p``, ellipse centre ``q`` and its label."""
+
+    p: np.ndarray
+    q: np.ndarray
+    label: EllipseLabel
+
+
+def build_trajectory(scene: Scene, path: PathData, cfg: Dict,
+                     boundary: Optional[np.ndarray] = None) -> Dict[str, np.ndarray]:
+    """Per-point LiDAR + ellipse labels for the whole resampled A* trajectory.
+
+    Point order is shared by every returned array: index ``i`` is exactly one
+    query point.  Continuity is evaluated on *every* adjacent pair; a pair whose
+    midpoint metric exceeds ``rho_max`` is split by inserting the midpoint of the
+    A* station **and** of the centre-line point, which keeps ``path_xy`` and
+    ``centerline_xy`` synchronous (``max_insert_per_interval`` levels, and at most
+    ``max_points_factor`` times the original station count in total).
+    """
+    cont_cfg = cfg.get("continuity", {})
+    rho_max = float(cont_cfg.get("rho_max", 0.85))
+    max_depth = int(cont_cfg.get("max_insert_per_interval", 2))
+    max_factor = float(cont_cfg.get("max_points_factor", 2.5))
+    rays = int(cfg["lidar"]["ray_count"])
+    max_range = float(cfg["lidar"]["max_range_m"])
+    if boundary is None:
+        boundary = scene.obstacle_boundary_cells()
+
+    p0 = np.asarray(path.p_xy, dtype=float).reshape(-1, 2)
+    q0 = np.asarray(path.q_xy, dtype=float).reshape(-1, 2)
+    if len(p0) != len(q0):
+        raise ValueError(f"path_xy {p0.shape} and centerline_xy {q0.shape} disagree")
+    limit = max(len(p0) + 1, int(np.floor(max_factor * len(p0))))
+
+    created: List[TrajectoryNode] = []
+
+    def _stored(xy: np.ndarray) -> np.ndarray:
+        """The exact value this coordinate will have in the NPZ (float32)."""
+        return np.asarray(xy, dtype=np.float32).astype(np.float64)
+
+    def node(p_i: np.ndarray, q_i: np.ndarray) -> TrajectoryNode:
+        # labels and LiDAR are derived from the *stored* coordinates, so every
+        # saved sample can be reproduced bit-for-bit from its own arrays
+        nd = TrajectoryNode(p=_stored(p_i), q=_stored(q_i),
+                            label=make_label(scene, _stored(q_i), boundary, cfg))
+        created.append(nd)
+        return nd
+
+    base = [node(p0[i], q0[i]) for i in range(len(p0))]
+
+    def pair_rho(a: TrajectoryNode, b: TrajectoryNode) -> Tuple[float, float]:
+        mid = 0.5 * (a.label.q + b.label.q)
+        return (midpoint_metric(a.label.S, a.label.q, mid),
+                midpoint_metric(b.label.S, b.label.q, mid))
+
+    def needs_split(a: TrajectoryNode, b: TrajectoryNode) -> bool:
+        # a failed ellipse has no meaningful metric: never split, just flag it
+        if not (a.label.safety_verified and b.label.safety_verified):
+            return False
+        # an inserted query point must itself stay in traversable space; a midpoint
+        # whose A* point falls into the inflated obstacle band is not inserted (the
+        # pair is then simply reported as not continuity-verified)
+        if not bool(scene.is_free(0.5 * (a.p + b.p))):
+            return False
+        ra, rb = pair_rho(a, b)
+        return bool(ra > rho_max or rb > rho_max)
+
+    def split(a: TrajectoryNode, b: TrajectoryNode, depth: int) -> List[TrajectoryNode]:
+        if depth >= max_depth or len(created) >= limit or not needs_split(a, b):
+            return []
+        m = node(0.5 * (a.p + b.p), 0.5 * (a.q + b.q))
+        return split(a, m, depth + 1) + [m] + split(m, b, depth + 1)
+
+    seq: List[TrajectoryNode] = [base[0]]
+    for a, b in zip(base[:-1], base[1:]):
+        seq.extend(split(a, b, 0))
+        seq.append(b)
+
+    n = len(seq)
+    rho_left = np.full(n, np.nan)
+    rho_right = np.full(n, np.nan)
+    cont = np.ones(n, dtype=np.uint8)
+    for i in range(1, n):
+        a, b = seq[i - 1], seq[i]
+        if not (a.label.safety_verified and b.label.safety_verified):
+            cont[i - 1] = 0
+            cont[i] = 0
+            continue
+        ra, rb = pair_rho(a, b)
+        rho_left[i], rho_right[i] = ra, rb
+        if ra > rho_max or rb > rho_max:
+            cont[i - 1] = 0
+            cont[i] = 0
+
+    p_xy = np.asarray([nd.p for nd in seq], dtype=np.float32).reshape(-1, 2)
+    q_xy = np.asarray([nd.q for nd in seq], dtype=np.float32).reshape(-1, 2)
+    safety = np.asarray([int(nd.label.safety_verified) for nd in seq], dtype=np.uint8)
+    return {
+        "path_xy": p_xy,
+        "centerline_xy": q_xy,
+        "center_offset": q_xy - p_xy,                      # exact in float32
+        "lidar_ranges": np.asarray(
+            [lidar_ranges(scene, nd.p, rays, max_range) for nd in seq],
+            dtype=np.float32).reshape(n, rays),
+        "ellipse_S": np.asarray([np.asarray(nd.label.S, float).ravel() for nd in seq],
+                                dtype=np.float64).reshape(n, 2, 2),
+        "ellipse_ab": np.asarray([np.asarray(nd.label.ab, float) for nd in seq],
+                                 dtype=np.float64).reshape(n, 2),
+        "ellipse_angle": np.asarray([nd.label.angle for nd in seq], dtype=np.float64),
+        "ellipse_area": np.asarray([nd.label.area for nd in seq], dtype=np.float64),
+        "safety_verified": safety,
+        "continuity_verified": cont,
+        "label_valid": (safety & cont).astype(np.uint8),
+        "solver_status": np.asarray([nd.label.status for nd in seq], dtype="U32"),
+        # ---- diagnostics (not saved in the V3 NPZ) ---------------------------
+        "rho_left": rho_left,
+        "rho_right": rho_right,
+        "clearance": np.asarray([nd.label.clearance for nd in seq], dtype=np.float64),
+        "path_tangent": tangents_of(p_xy.astype(float)),
+        "solve_ms": np.asarray([nd.label.solve_ms for nd in seq], dtype=np.float64),
+        "halfspaces": [[{"n": [float(h.n[0]), float(h.n[1])], "d": float(h.d)}
+                        for h in nd.label.halfspaces if np.all(np.isfinite(h.n))]
+                       for nd in seq],
+        "n_base_points": int(len(p0)),
+        "n_inserted": int(n - len(p0)),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # One scene
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -124,6 +259,7 @@ class SceneResult:
     labels: Dict[str, np.ndarray]
     stats: Dict[str, object] = field(default_factory=dict)
     halfspaces: Dict[int, List[Dict[str, List[float]]]] = field(default_factory=dict)
+    trajectories: List[Dict[str, object]] = field(default_factory=list)
 
 
 def _git_commit(short: bool = True) -> str:
@@ -138,16 +274,16 @@ def _git_commit(short: bool = True) -> str:
 
 
 def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneResult:
-    """Run A* -> centreline -> anchors -> ellipses -> continuity for one scene.
+    """Run A* -> centreline -> per-point LiDAR + ellipses -> continuity for one scene.
 
-    Only paths that passed the unified acceptance gate produce labels; a rejected
-    path is recorded (with its failures) and contributes no training data.
+    V3: every resampled A* station of an accepted path is a query point, and each
+    accepted path yields one self-contained trajectory block (``result.trajectories``)
+    whose arrays are strictly aligned.  Only paths that passed the unified
+    acceptance gate produce data; a rejected path is recorded and contributes none.
     """
     t_scene = time.perf_counter()
     boundary = scene.obstacle_boundary_cells()
     pc = cfg["path"]
-    ac = cfg["anchor"]
-    cont = cfg["continuity"]
 
     fields = {k: [] for k in (
         "point_id", "anchor_id", "path_id", "p_xy", "q_xy", "center_offset", "path_tangent",
@@ -157,6 +293,7 @@ def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneRes
     )}
     statuses: Dict[str, int] = {}
     path_records: List[Dict[str, object]] = []
+    trajectories: List[Dict[str, object]] = []
     halfspaces_all: Dict[int, List[Dict[str, List[float]]]] = {}
     used_pairs: List[Tuple[np.ndarray, np.ndarray]] = []
     solve_times: List[float] = []
@@ -205,114 +342,54 @@ def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneRes
                                  "failure_stage": "acceptance"})
             continue
 
-        anchors = anchor_indices(scene, path, ac)
-        # ---- generate labels, inserting anchors for continuity (max 2 per gap)
-        lab_by_idx: Dict[int, EllipseLabel] = {}
-        path_solve_times: List[float] = []
+        # ---- one self-contained trajectory block for this path (V3) ----------
+        traj = build_trajectory(scene, path, cfg, boundary=boundary)
+        n_points = int(len(traj["path_xy"]))
+        trajectories.append({**traj, "path_id": int(path_id),
+                             "start_xy": np.asarray(pair[0], float),
+                             "goal_xy": np.asarray(pair[1], float)})
 
-        def label_at(i: int) -> EllipseLabel:
-            if i not in lab_by_idx:
-                lab = make_label(scene, path.q_xy[i], boundary, cfg)
-                lab_by_idx[i] = lab
-                path_solve_times.append(lab.solve_ms)
-            return lab_by_idx[i]
-
-        for i in anchors:
-            label_at(i)
-
-        inserted: set = set()
-
-        def ensure_continuity(a: int, b: int, depth: int) -> None:
-            nonlocal n_inserted
-            if depth > int(cont["max_insert_per_interval"]):
-                return
-            la, lb = label_at(a), label_at(b)
-            mid = 0.5 * (path.q_xy[a] + path.q_xy[b])
-            if (midpoint_metric(la.S, la.q, mid) <= float(cont["rho_max"])
-                    and midpoint_metric(lb.S, lb.q, mid) <= float(cont["rho_max"])):
-                return
-            m = (a + b) // 2
-            if m in (a, b):
-                return
-            label_at(m)
-            inserted.add(m)
-            n_inserted += 1
-            ensure_continuity(a, m, depth + 1)
-            ensure_continuity(m, b, depth + 1)
-
-        for a, b in zip(anchors[:-1], anchors[1:]):
-            ensure_continuity(a, b, 0)
-
-        order = sorted(set(anchors) | inserted)
-        halfspaces_out: Dict[int, List[Dict[str, List[float]]]] = {}
-        n_path_labels = 0
-        n_path_safe = 0
-        n_path_cont = 0
-        n_path_both = 0
-        for anchor_id, i in enumerate(order):
-            lab = lab_by_idx.get(i) or label_at(i)
-            if not lab.safety_verified or lab.status not in ("optimal", "initial_circle_kept"):
-                statuses[lab.status] = statuses.get(lab.status, 0) + 1
-                if not lab.safety_verified:
-                    continue
-            # continuity of this anchor with its neighbours in the final sequence
-            cont_ok = True
-            rho_l = rho_r = 0.0
-            if anchor_id > 0:
-                j = order[anchor_id - 1]
-                lj = lab_by_idx.get(j) or label_at(j)
-                mid = 0.5 * (path.q_xy[j] + path.q_xy[i])
-                rho_l = midpoint_metric(lj.S, lj.q, mid)
-                rho_r = midpoint_metric(lab.S, lab.q, mid)
-                cont_ok &= (rho_l <= float(cont["rho_max"]) and rho_r <= float(cont["rho_max"]))
-            p_i = path.p_xy[i]
-            safe_v = int(bool(lab.safety_verified))
-            cont_v = int(bool(cont_ok))
+        # flat rows (one per query point) are kept for the legacy scene summaries
+        for k in range(n_points):
+            lab_status = str(traj["solver_status"][k])
+            statuses[lab_status] = statuses.get(lab_status, 0) + 1
             fields["point_id"].append(len(fields["p_xy"]))
-            fields["anchor_id"].append(anchor_id)
+            fields["anchor_id"].append(k)
             fields["path_id"].append(path_id)
-            fields["p_xy"].append(p_i)
-            fields["q_xy"].append(path.q_xy[i])
-            fields["center_offset"].append(path.q_xy[i] - p_i)
-            fields["path_tangent"].append(path.tangent[i])
-            fields["lidar_ranges"].append(lidar_ranges(scene, p_i, int(cfg["lidar"]["ray_count"]),
-                                                       float(cfg["lidar"]["max_range_m"])))
-            fields["ellipse_S"].append(lab.S.ravel())
-            fields["ellipse_ab"].append(lab.ab)
-            fields["ellipse_angle"].append(lab.angle)
-            fields["ellipse_area"].append(lab.area)
-            fields["clearance"].append(lab.clearance)
-            fields["solver_status"].append(lab.status)
-            fields["safety_verified"].append(safe_v)
-            fields["continuity_verified"].append(cont_v)
-            fields["label_valid"].append(int(safe_v and cont_v))
-            fields["generation_time_ms"].append(lab.solve_ms)
-            fields["rho_left"].append(rho_l)
-            fields["rho_right"].append(rho_r)
-            statuses[lab.status] = statuses.get(lab.status, 0) + 1
-            n_path_labels += 1
-            n_path_safe += safe_v
-            n_path_cont += cont_v
-            n_path_both += int(safe_v and cont_v)
-            if len(path_solve_times) and path_id == 0:
+            fields["p_xy"].append(traj["path_xy"][k])
+            fields["q_xy"].append(traj["centerline_xy"][k])
+            fields["center_offset"].append(traj["center_offset"][k])
+            fields["path_tangent"].append(traj["path_tangent"][k])
+            fields["lidar_ranges"].append(traj["lidar_ranges"][k])
+            fields["ellipse_S"].append(np.asarray(traj["ellipse_S"][k]).ravel())
+            fields["ellipse_ab"].append(traj["ellipse_ab"][k])
+            fields["ellipse_angle"].append(float(traj["ellipse_angle"][k]))
+            fields["ellipse_area"].append(float(traj["ellipse_area"][k]))
+            fields["clearance"].append(float(traj["clearance"][k]))
+            fields["solver_status"].append(lab_status)
+            fields["safety_verified"].append(int(traj["safety_verified"][k]))
+            fields["continuity_verified"].append(int(traj["continuity_verified"][k]))
+            fields["label_valid"].append(int(traj["label_valid"][k]))
+            fields["generation_time_ms"].append(float(traj["solve_ms"][k]))
+            fields["rho_left"].append(float(traj["rho_left"][k]))
+            fields["rho_right"].append(float(traj["rho_right"][k]))
+            if path_id == 0:
                 # keep the half-spaces of the first path for the figures
-                halfspaces_out[len(fields["anchor_id"]) - 1] = [
-                    {"n": [float(h.n[0]), float(h.n[1])], "d": float(h.d)}
-                    for h in lab.halfspaces if np.all(np.isfinite(h.n))
-                ]
+                halfspaces_all[len(fields["p_xy"]) - 1] = traj["halfspaces"][k]
 
-        for aid, hs in halfspaces_out.items():
-            halfspaces_all[aid] = hs
-        solve_times.extend(path_solve_times)
+        solve_times.extend(float(v) for v in traj["solve_ms"])
+        n_inserted += int(traj["n_inserted"])
         checks = dict(getattr(path, "centerline_checks", {}))
         path_records.append({
             **common,
-            "n_anchors": int(len(order)),
-            "n_labels": int(n_path_labels),
-            "n_ellipse_safe": int(n_path_safe),
-            "n_continuity_verified": int(n_path_cont),
-            "n_both_verified": int(n_path_both),
-            "n_inserted": len(inserted),
+            "n_points": int(n_points),
+            "n_base_points": int(traj["n_base_points"]),
+            "n_anchors": int(n_points),
+            "n_labels": int(n_points),
+            "n_ellipse_safe": int(np.sum(traj["safety_verified"])),
+            "n_continuity_verified": int(np.sum(traj["continuity_verified"])),
+            "n_both_verified": int(np.sum(traj["label_valid"])),
+            "n_inserted": int(traj["n_inserted"]),
             "max_offset_m": float(path.max_offset),
             "segment_ok": bool(path.segment_ok),
             "centerline_method": getattr(path, "centerline_method", "legacy_weighted"),
@@ -322,9 +399,8 @@ def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneRes
             "clearance_p_mean": float(np.mean(path.clearance_p)),
             "clearance_q_mean": float(np.mean(path.clearance_q)),
             "length_m": float(np.sum(np.linalg.norm(np.diff(path.q_xy, axis=0), axis=1))),
-            "ellipse_ms_median": float(np.median(path_solve_times)) if path_solve_times else None,
-            "ellipse_ms_p95": (float(np.percentile(path_solve_times, 95))
-                               if path_solve_times else None),
+            "ellipse_ms_median": float(np.median(traj["solve_ms"])),
+            "ellipse_ms_p95": float(np.percentile(traj["solve_ms"], 95)),
             "d_safe": checks.get("d_safe"),
             "segment_step_m": checks.get("segment_step_m"),
             "homotopy_lam_step_m": checks.get("homotopy_lam_step_m"),
@@ -379,7 +455,9 @@ def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneRes
         "safety_margin_m": float(cfg["robot"]["safety_margin_m"]),
         "lidar_rays": int(cfg["lidar"]["ray_count"]),
         "lidar_max_range_m": float(cfg["lidar"]["max_range_m"]),
-        "anchor_spacing": {k: float(v) for k, v in cfg["anchor"].items()},
+        "query_point_policy": "every_resampled_astar_station",
+        "anchor_spacing": ({k: float(v) for k, v in cfg["anchor"].items()}
+                           if "anchor" in cfg else None),
         "rho_max": float(cfg["continuity"]["rho_max"]),
         "git_commit": _git_commit(),
     }
@@ -395,6 +473,11 @@ def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneRes
         "n_paths": len(path_records),
         "n_paths_accepted": int(sum(1 for r in path_records if r.get("accepted"))),
         "n_paths_failed": int(sum(1 for r in path_records if not r.get("accepted"))),
+        "n_trajectories": int(len(trajectories)),
+        "n_query_points": n_labels,
+        "points_per_trajectory_mean": (float(np.mean([len(t["path_xy"])
+                                                      for t in trajectories]))
+                                       if trajectories else None),
         "n_anchors": n_labels,
         "n_ellipse_safe": n_safe,
         "n_continuity_verified": n_cont,
@@ -424,4 +507,4 @@ def process_scene(scene: Scene, cfg: Dict, rng: np.random.Generator) -> SceneRes
                   for r in path_records],
     }
     return SceneResult(scene=scene, paths=path_records, labels=arrays, stats=stats,
-                       halfspaces=halfspaces_all)
+                       halfspaces=halfspaces_all, trajectories=trajectories)

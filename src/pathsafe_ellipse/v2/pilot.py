@@ -1,9 +1,14 @@
-"""Pilot artefact I/O: metadata block, per-scene NPZ with paths + labels, index.
+"""Pilot artefact I/O.
 
-The NPZ reuses the *formal* pipeline field names (``anchor_id``, ``path_id``,
-``p_xy``, ``q_xy``, ``ellipse_S``, ``ellipse_ab``, ``ellipse_area`` ...) plus
-``point_id`` and ``label_valid`` so a dataset built from the pilot is
-indistinguishable from a production one apart from the version metadata.
+Two formats live here:
+
+``save_scene_npz`` / ``load_scene_npz``
+    V2/V2.1 per-*scene* NPZ (all paths of a scene + sparse anchor label rows).
+    Kept only so the old scripts still run.
+
+``save_trajectory_npz`` / ``load_trajectory_npz``
+    V3 per-*trajectory* NPZ: one inflation map, one A* trajectory, one optimised
+    centre line, and per-point LiDAR + ellipse labels that are strictly aligned.
 """
 from __future__ import annotations
 
@@ -176,3 +181,122 @@ def write_index(out_dir: str, entries: List[Dict[str, object]], name: str = "ind
     with open(dst, "w", encoding="utf-8") as fh:
         json.dump({"n_files": len(entries), "entries": entries}, fh, indent=2)
     return dst
+
+
+# --------------------------------------------------------------------------- #
+# V3: one NPZ == one complete trajectory
+# --------------------------------------------------------------------------- #
+#: per-point arrays of a trajectory NPZ (all of length N, one row per query point)
+TRAJECTORY_POINT_FIELDS = ("center_offset", "ellipse_S", "ellipse_ab", "ellipse_angle",
+                           "ellipse_area", "safety_verified", "continuity_verified",
+                           "label_valid", "solver_status")
+
+
+def trajectory_metadata(scene: Scene, cfg: Dict, *, seed: int, path_id: int,
+                        source_rel_path: str, map_group: str,
+                        path_record: Optional[Dict[str, object]] = None
+                        ) -> Dict[str, object]:
+    """Provenance block of one trajectory NPZ: everything needed to re-create it."""
+    cc = cfg["centerline"]
+    ec = cfg["ellipse"]
+    cont = cfg["continuity"]
+    meta: Dict[str, object] = {
+        "label_version": str(cfg["project"].get("label_version", "v3")),
+        "query_point_policy": "every_resampled_astar_station",
+        "git_commit": git_commit(),
+        "scene_id": str(scene.scene_id),
+        "source_map_id": str(scene.source_map_id),
+        "source_rel_path": str(source_rel_path),
+        "map_group": str(map_group),
+        "path_id": int(path_id),
+        "seed": int(seed),
+        "r_scene": float(scene.r_scene),
+        "physical_field_m": float(scene.physical_field_m),
+        "source_resolution_m": float(scene.source_resolution),
+        "crop_origin": [int(v) for v in scene.crop_origin],
+        "crop_px": int(scene.crop_px),
+        "robot_radius_m": float(cfg["robot"]["radius_m"]),
+        "safety_margin_m": float(cfg["robot"]["safety_margin_m"]),
+        "lidar_rays": int(cfg["lidar"]["ray_count"]),
+        "lidar_max_range_m": float(cfg["lidar"]["max_range_m"]),
+        "resample": {k: float(v) for k, v in cfg["resample"].items()},
+        "centerline": {k: v for k, v in cc.items() if not str(k).startswith("_")},
+        "ellipse": {k: v for k, v in ec.items() if not str(k).startswith("_")},
+        "continuity": {k: v for k, v in cont.items() if not str(k).startswith("_")},
+        "map_definition": "0 = traversable (robot centre allowed), 1 = obstacle or safety inflation",
+    }
+    if path_record:
+        for key in ("status", "label_status", "homotopy_verified", "station_order_ok",
+                    "segment_ok", "max_offset_m", "length_m", "length_ratio", "d_safe",
+                    "centerline_ms", "solver_success", "solver_iterations",
+                    "ellipse_ms_median", "ellipse_ms_p95"):
+            if key in path_record:
+                meta[key] = path_record[key]
+    return meta
+
+
+def save_trajectory_npz(*, scene: Scene, path_xy, centerline_xy, lidar_ranges,
+                        labels: Dict[str, object], start_xy, goal_xy,
+                        meta: Dict[str, object], out_dir: str,
+                        stem: Optional[str] = None) -> str:
+    """Write ONE trajectory NPZ: map + path + centre line + per-point LiDAR/labels.
+
+    ``labels`` supplies the per-point arrays (``ellipse_S``, ``ellipse_ab``,
+    ``ellipse_angle``, ``ellipse_area``, ``safety_verified``,
+    ``continuity_verified``, ``label_valid``, ``solver_status``).  Every array is
+    validated to have exactly ``N`` rows so a misaligned file can never be written.
+    """
+    p = np.asarray(path_xy, dtype=np.float32).reshape(-1, 2)
+    q = np.asarray(centerline_xy, dtype=np.float32).reshape(-1, 2)
+    n = int(len(p))
+    if n < 2:
+        raise ValueError(f"a trajectory needs >= 2 query points, got {n}")
+    if len(q) != n:
+        raise ValueError(f"centerline_xy {q.shape} does not align with path_xy {p.shape}")
+    rays = int(meta.get("lidar_rays", 0)) or int(np.asarray(lidar_ranges).shape[-1])
+    lidar = np.asarray(lidar_ranges, dtype=np.float32).reshape(n, -1)
+    if lidar.shape != (n, rays):
+        raise ValueError(f"lidar_ranges {lidar.shape} != ({n}, {rays})")
+
+    arrays: Dict[str, np.ndarray] = {
+        "occupancy": scene.blocked.astype(np.uint8),
+        "path_xy": p,
+        "centerline_xy": q,
+        "lidar_ranges": lidar,
+        "start_xy": np.asarray(start_xy, dtype=np.float32).reshape(2),
+        "goal_xy": np.asarray(goal_xy, dtype=np.float32).reshape(2),
+    }
+    for key in TRAJECTORY_POINT_FIELDS:
+        if key == "center_offset":
+            continue
+        if key not in labels:
+            raise KeyError(f"labels missing per-point array '{key}'")
+        arr = np.asarray(labels[key])
+        if int(arr.shape[0]) != n:
+            raise ValueError(f"labels['{key}'] has {arr.shape[0]} rows, expected {n}")
+        arrays[key] = arr
+    # the offset is derived from the *stored* float32 coordinates so that
+    # center_offset == centerline_xy - path_xy holds bit-exactly after loading
+    arrays["center_offset"] = q - p
+    arrays["meta_json"] = np.asarray(json.dumps(meta, default=float), dtype="U")
+
+    os.makedirs(out_dir, exist_ok=True)
+    if not stem:
+        stem = "{0}_path_{1:03d}".format(meta["scene_id"], int(meta["path_id"]))
+    dst = os.path.join(out_dir, f"{stem}.npz")
+    # atomic write: parallel collectors may be killed mid-run, a half-written
+    # NPZ must never look like a finished sample
+    tmp = os.path.join(out_dir, f"{stem}.{os.getpid()}.tmp.npz")
+    np.savez_compressed(tmp, **arrays)
+    os.replace(tmp, dst)
+    return dst
+
+
+def load_trajectory_npz(path: str) -> Dict[str, object]:
+    """Load one trajectory NPZ; ``meta`` is decoded back into a dict."""
+    with np.load(path, allow_pickle=False) as z:
+        out: Dict[str, object] = {k: z[k] for k in z.files}
+    if "meta_json" in out:
+        raw = out["meta_json"]
+        out["meta"] = json.loads(str(raw.item() if raw.ndim == 0 else raw))
+    return out

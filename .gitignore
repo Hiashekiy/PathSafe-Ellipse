@@ -32,3 +32,13 @@ Desktop.ini
 # temporary
 *.tmp
 ~$*
+
+# V3 trajectory-level dataset: cached parsed maps, per-shard progress, run outputs
+logs_train_v3/
+data/cache_v3/
+
+# trained checkpoints (regenerable from the tracked code + config; ~5 MB each)
+runs_v3/
+
+# scratch benchmarks
+_scratch_*
