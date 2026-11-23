@@ -37,3 +37,6 @@ checkpoints/*
 
 # local transfer bundles
 dist/
+
+# external reference implementation (own git repo, not part of this project)
+Neural-IRIS/

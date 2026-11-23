@@ -719,3 +719,57 @@ $PY scripts/run_ablation.py --steps 600 --limit-train 3000 --eval-traj 128
 - 硬件：NVIDIA RTX 4070 12 GB；torch 2.9.1+cu126；CUDA 可用；`cudnn.benchmark = True`。
 - 总耗时（本机）：数据审计 5.1 min、SDF 构建 3.7 min、40k×1ep 训练 17.9 min、续训 5.1 min、
   **10k×50ep 长训 196 min**、每次全量验收（val 或 test）约 2.5–3 min、消融 8 项约 13 min。
+
+---
+
+## 15. 凸区域生成（椭圆 → 多面体，借鉴 Neural-IRIS）
+
+方案之外的新增能力：把每个预测椭圆吹成一个凸多面体（半空间交），供 MPC/规划器直接使用。
+实现在 ellipsenet/geometry/polytopes.py，测试 	ests/test_polytopes.py，
+端到端示例 scripts/build_convex_regions.py。
+
+### 15.1 借用的方法与两处改进
+
+Neural-IRIS（Neural-IRIS/src/neural_iris/safe_region.py）的做法：在**局部 patch** 上取障碍
+边界点，按椭圆二次型距离 (x−c)ᵀQ(x−c) 升序贪心，为每个点加一条分离超平面
+n = Q(obs−c)/‖·‖、b = n·obs − margin，并把已被该平面排除的点过滤掉，最后加 patch 四边。
+
+本实现保留这个骨架，两处改动（都是为了更准）：
+1. **障碍按方格处理**：平面放在方格的**近端面**  = n·o − h(|n_x|+|n_y|) − margin
+   （h = r/2），而不是 
+·obs − margin。早期误用远端支撑（+h），平面会切进方格，
+   实测转角处会漏出约 2 cm —— 已修正并由测试锁定。
+2. **解析验收**：方格与多面体相交 ⟺ 方格四角有角点落在多面体内（或反过来多面体顶点落在
+   方格内）。这两个都是闭式判定，不需要采样，也不扫全图（只扫各区域的局部窗口）。
+
+### 15.2 并行与只做局部
+
+- 区域内**所有椭圆共用一组向量化 kernel**（uild_polytopes），没有逐椭圆 python 循环；
+  逐椭圆的 uild_polytopes_serial 只作为测试参照。
+- 每个椭圆只用自己周围的局部窗口：窗口半径 = 半长轴 + window_margin_m（默认 3.0 m），
+  四张窗口面本身作为硬平面加入 —— 因此区域**必然**落在窗口内，验收也只需看窗口内的格子。
+- window_margin_m 是这个模块唯一的精度/速度旋钮：窗口越大区域越大，代价按面积增长。
+
+### 15.3 实测（RTX 4070，test 划分 8 条轨迹 / 202 个椭圆）
+
+| 指标 | 数值 |
+|---|---|
+| 批量构造（整条轨迹一次调用） | **18.3 ms / 轨迹**，0.30–0.73 ms / 椭圆 |
+| 逐椭圆串行（同一批椭圆） | **231.9 ms / 轨迹**（≈ 12.7× 慢） |
+| 压力基准：256 个椭圆一次批量 | **35.9 ms（140 µs/椭圆）**，CPU 回退 6.6 ms/椭圆 |
+| 精确安全验收 | **0 个违规区域**（202/202 收敛） |
+| 椭圆被区域包含 | 是；最大越界 0.014 m < 区域留边 0.02 m |
+| 未参与包含性检查的椭圆 | 32/202 —— 这些椭圆自身碰撞或越出地图，**任何**地图内的无障碍凸区域都不可能包含它们 |
+
+图：
+esults/figures/polytopes/regions_XX.png（橙色半透明=凸区域，绿色=预测椭圆，蓝线=A* 路径），
+数据：
+esults/metrics/polytope_bench.json。
+
+### 15.4 复现
+
+`ash
+ tests/test_polytopes.py
+ scripts/build_convex_regions.py --n 8 --seed 5          # 预测 → 凸区域 → 验收 + 图
+ scripts/build_convex_regions.py --n 16 --window-margin 3.0   # 更大的区域（更慢）
+`
