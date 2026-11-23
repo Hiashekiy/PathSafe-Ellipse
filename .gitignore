@@ -33,6 +33,8 @@ _scratch_*
 runs_v3sdf/*
 !runs_v3sdf/conft3/
 !runs_v3sdf/conft3/**
+# ... and inside it, "last" is a duplicate of the best checkpoint
+runs_v3sdf/conft3/last.pt
 
 # ad-hoc console captures are not tracked (the three kept run logs are listed below)
 logs_v3sdf_*
