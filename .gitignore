@@ -34,3 +34,6 @@ checkpoints/*
 !checkpoints/v3_config.json
 !checkpoints/v3_run_meta.json
 !checkpoints/v3_train_log.csv
+
+# local transfer bundles
+dist/
