@@ -1,0 +1,44 @@
+[
+  {
+    "png": "pred_00_Berlin_1_1024_part_0_0_c0_151_f48_k0_path_000.png",
+    "scene_id": "Berlin_1_1024_part_0_0_c0_151_f48_k0",
+    "n_points": 18,
+    "exact_safe_rate": 1.0,
+    "boundary_cover_rate": 0.4365808823529412
+  },
+  {
+    "png": "pred_01_Berlin_1_1024_part_0_0_c0_151_f48_k0_path_001.png",
+    "scene_id": "Berlin_1_1024_part_0_0_c0_151_f48_k0",
+    "n_points": 35,
+    "exact_safe_rate": 0.8857142857142857,
+    "boundary_cover_rate": 0.45496323529411764
+  },
+  {
+    "png": "pred_02_Berlin_1_1024_part_0_0_c0_151_f48_k0_path_002.png",
+    "scene_id": "Berlin_1_1024_part_0_0_c0_151_f48_k0",
+    "n_points": 7,
+    "exact_safe_rate": 1.0,
+    "boundary_cover_rate": 0.4296875
+  },
+  {
+    "png": "pred_03_Berlin_1_1024_part_0_0_c102_10_f64_k1_path_000.png",
+    "scene_id": "Berlin_1_1024_part_0_0_c102_10_f64_k1",
+    "n_points": 49,
+    "exact_safe_rate": 0.8571428571428571,
+    "boundary_cover_rate": 0.4368489583333333
+  },
+  {
+    "png": "pred_04_Berlin_1_1024_part_0_0_c102_10_f64_k1_path_001.png",
+    "scene_id": "Berlin_1_1024_part_0_0_c102_10_f64_k1",
+    "n_points": 10,
+    "exact_safe_rate": 1.0,
+    "boundary_cover_rate": 0.453125
+  },
+  {
+    "png": "pred_05_Berlin_1_1024_part_0_0_c102_10_f64_k1_path_002.png",
+    "scene_id": "Berlin_1_1024_part_0_0_c102_10_f64_k1",
+    "n_points": 39,
+    "exact_safe_rate": 0.4358974358974359,
+    "boundary_cover_rate": 0.3815789473684211
+  }
+]

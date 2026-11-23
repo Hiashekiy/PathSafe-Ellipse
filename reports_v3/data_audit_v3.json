@@ -1,0 +1,291 @@
+{
+  "n_files": 50648,
+  "n_scenes": 17038,
+  "n_map_groups": 30,
+  "map_groups": [
+    "Berlin_0",
+    "Berlin_1",
+    "Berlin_2",
+    "Boston_0",
+    "Boston_1",
+    "Boston_2",
+    "Denver_0",
+    "Denver_1",
+    "Denver_2",
+    "London_0",
+    "London_1",
+    "London_2",
+    "Milan_0",
+    "Milan_1",
+    "Milan_2",
+    "Moscow_0",
+    "Moscow_1",
+    "Moscow_2",
+    "NewYork_0",
+    "NewYork_1",
+    "NewYork_2",
+    "Paris_0",
+    "Paris_1",
+    "Paris_2",
+    "Shanghai_0",
+    "Shanghai_1",
+    "Shanghai_2",
+    "Sydney_0",
+    "Sydney_1",
+    "Sydney_2"
+  ],
+  "n_query_points": 1487728,
+  "points_per_trajectory": {
+    "mean": 29.37387458537356,
+    "p05": 10.0,
+    "p50": 24.0,
+    "p95": 66.0,
+    "min": 6.0,
+    "max": 382.0
+  },
+  "field_key_variants": [
+    {
+      "keys": [
+        "meta_json",
+        "center_offset",
+        "centerline_xy",
+        "continuity_verified",
+        "ellipse_S",
+        "ellipse_ab",
+        "ellipse_angle",
+        "ellipse_area",
+        "goal_xy",
+        "label_valid",
+        "lidar_ranges",
+        "occupancy",
+        "path_xy",
+        "safety_verified",
+        "solver_status",
+        "start_xy"
+      ],
+      "count": 50648
+    }
+  ],
+  "files_with_signed_distance_m": 0,
+  "crop_px_variants": [
+    192,
+    256,
+    320
+  ],
+  "r_scene_variants": [
+    0.1875,
+    0.25,
+    0.3125
+  ],
+  "physical_field_m_variants": [
+    48.0,
+    64.0,
+    80.0
+  ],
+  "lidar_rays_variants": [
+    16
+  ],
+  "lidar_max_range_variants": [
+    9.0
+  ],
+  "occ_shapes": [
+    [
+      256,
+      256
+    ]
+  ],
+  "problems": {},
+  "label": {
+    "valid_rate": 0.9792771259262446,
+    "safety_verified_rate": 0.9979519105642967,
+    "continuity_verified_rate": 0.9792771259262446,
+    "a_ge_b_frac_min": 1.0,
+    "area_rel_err_max": 8.720907428925462e-13,
+    "S_min_eig_min": 1.0000000000235477e-06,
+    "degenerate_frac_mean": 0.0
+  },
+  "path": {
+    "inside_frac_min": 1.0,
+    "on_blocked_frac_mean": 0.00017422146396942097,
+    "on_blocked_frac_max": 0.1111111111111111,
+    "on_blocked_frac_valid_mean": 6.372684654486278e-05,
+    "spacing_mean": {
+      "mean": 1.422252738628479,
+      "p05": 0.7912629388921038,
+      "p50": 1.425933122198769,
+      "p95": 1.9397972621701631,
+      "min": 0.2757202460586533,
+      "max": 2.0
+    },
+    "spacing_min": 0.000445070720275041,
+    "spacing_max": 2.0000048548077043,
+    "s_monotone_all": true
+  },
+  "lidar": {
+    "hit_frac_mean": 0.3380453227899804,
+    "hit_frac_p05": 0.0,
+    "endpoint_blocked_frac_min": 0.0,
+    "endpoint_blocked_frac_mean": 0.09774267702393817,
+    "midpoint_free_frac_min": 0.746031746031746,
+    "range_min_min": -0.0,
+    "range_max_max": 9.0
+  },
+  "trajectory_dir": "D:\\ProjectDirectory\\PathSafe-Ellipse\\data\\processed_v3\\trajectories\\train_v3",
+  "audited_files": 50648,
+  "sdf": {
+    "n_unique_maps": 17038,
+    "n_files": 50648,
+    "maps_per_file": 0.33640025272468804,
+    "resolution_m": [
+      0.1875,
+      0.25,
+      0.3125
+    ],
+    "sdf_min": -45.375,
+    "sdf_max": 39.21875,
+    "sdf_p01_of_map_p01": {
+      "mean": -5.717908708946934,
+      "p05": -12.605046224594116,
+      "p50": -4.625,
+      "p95": -2.1364415287971505,
+      "min": -41.625,
+      "max": 0.15625
+    },
+    "sdf_p50_of_map_p50": {
+      "mean": 2.04817474872654,
+      "p05": 0.15625,
+      "p50": 1.5266139507293701,
+      "p95": 6.09375,
+      "min": -12.394369125366211,
+      "max": 11.09375
+    },
+    "sdf_p99_of_map_p99": {
+      "mean": 12.048487462940344,
+      "p05": 5.34375,
+      "p50": 10.790192127227783,
+      "p95": 22.34375,
+      "min": 1.40625,
+      "max": 35.46875
+    },
+    "sign_mismatch_max": 0.0,
+    "sdf_at_path": {
+      "mean": 3.130890387554306,
+      "p05": 0.125,
+      "p50": 1.2320752143859863,
+      "p95": 12.125,
+      "min": -0.15625,
+      "max": 35.46875
+    },
+    "sdf_at_path_negative_frac": 0.00027304499781564,
+    "path_inside_frac_min": 1.0,
+    "sampled_files": 2500
+  },
+  "figures": [
+    {
+      "png": "audit_00_Berlin_0_1024_part_1_0_c77_234_f48_k1_path_001.png",
+      "scene_id": "Berlin_0_1024_part_1_0_c77_234_f48_k1",
+      "n_points": 30
+    },
+    {
+      "png": "audit_01_Berlin_1_1024_part_0_1_c154_22_f80_k1_path_000.png",
+      "scene_id": "Berlin_1_1024_part_0_1_c154_22_f80_k1",
+      "n_points": 28
+    },
+    {
+      "png": "audit_02_Berlin_2_1024_part_0_1_c174_203_f48_k2_path_001.png",
+      "scene_id": "Berlin_2_1024_part_0_1_c174_203_f48_k2",
+      "n_points": 8
+    },
+    {
+      "png": "audit_03_Boston_2_1024_part_0_1_c112_70_f48_k2_path_000.png",
+      "scene_id": "Boston_2_1024_part_0_1_c112_70_f48_k2",
+      "n_points": 12
+    },
+    {
+      "png": "audit_04_Denver_2_1024_part_0_0_c10_35_f80_k2_path_001.png",
+      "scene_id": "Denver_2_1024_part_0_0_c10_35_f80_k2",
+      "n_points": 47
+    },
+    {
+      "png": "audit_05_London_0_1024_part_0_0_c58_176_f80_k2_path_002.png",
+      "scene_id": "London_0_1024_part_0_0_c58_176_f80_k2",
+      "n_points": 24
+    },
+    {
+      "png": "audit_06_Moscow_0_1024_part_0_0_c160_49_f80_k2_path_000.png",
+      "scene_id": "Moscow_0_1024_part_0_0_c160_49_f80_k2",
+      "n_points": 33
+    },
+    {
+      "png": "audit_07_Moscow_0_1024_part_0_1_c27_79_f80_k1_path_000.png",
+      "scene_id": "Moscow_0_1024_part_0_1_c27_79_f80_k1",
+      "n_points": 16
+    },
+    {
+      "png": "audit_08_Moscow_1_1024_part_0_1_c176_109_f48_k2_path_000.png",
+      "scene_id": "Moscow_1_1024_part_0_1_c176_109_f48_k2",
+      "n_points": 15
+    },
+    {
+      "png": "audit_09_Moscow_1_256_part_0_0_c198_66_f64_k0_path_002.png",
+      "scene_id": "Moscow_1_256_part_0_0_c198_66_f64_k0",
+      "n_points": 18
+    },
+    {
+      "png": "audit_10_NewYork_0_1024_part_0_0_c51_42_f64_k1_path_002.png",
+      "scene_id": "NewYork_0_1024_part_0_0_c51_42_f64_k1",
+      "n_points": 28
+    },
+    {
+      "png": "audit_11_NewYork_0_512_part_0_0_c167_122_f64_k2_path_001.png",
+      "scene_id": "NewYork_0_512_part_0_0_c167_122_f64_k2",
+      "n_points": 44
+    },
+    {
+      "png": "audit_12_NewYork_1_1024_part_0_0_c128_167_f80_k2_path_000.png",
+      "scene_id": "NewYork_1_1024_part_0_0_c128_167_f80_k2",
+      "n_points": 76
+    },
+    {
+      "png": "audit_13_NewYork_1_1024_part_1_0_c18_44_f48_k1_path_000.png",
+      "scene_id": "NewYork_1_1024_part_1_0_c18_44_f48_k1",
+      "n_points": 67
+    },
+    {
+      "png": "audit_14_Paris_0_256_part_0_0_c36_252_f64_k0_path_001.png",
+      "scene_id": "Paris_0_256_part_0_0_c36_252_f64_k0",
+      "n_points": 37
+    },
+    {
+      "png": "audit_15_Shanghai_0_1024_part_0_1_c60_166_f80_k1_path_001.png",
+      "scene_id": "Shanghai_0_1024_part_0_1_c60_166_f80_k1",
+      "n_points": 110
+    },
+    {
+      "png": "audit_16_Shanghai_1_1024_part_1_0_c25_245_f48_k1_path_002.png",
+      "scene_id": "Shanghai_1_1024_part_1_0_c25_245_f48_k1",
+      "n_points": 18
+    },
+    {
+      "png": "audit_17_Sydney_0_1024_part_1_0_c111_158_f64_k2_path_002.png",
+      "scene_id": "Sydney_0_1024_part_1_0_c111_158_f64_k2",
+      "n_points": 39
+    },
+    {
+      "png": "audit_18_Sydney_1_1024_part_0_0_c109_161_f80_k2_path_000.png",
+      "scene_id": "Sydney_1_1024_part_0_0_c109_161_f80_k2",
+      "n_points": 15
+    },
+    {
+      "png": "audit_19_Sydney_2_1024_part_0_0_c249_209_f64_k1_path_002.png",
+      "scene_id": "Sydney_2_1024_part_0_0_c249_209_f64_k1",
+      "n_points": 23
+    }
+  ],
+  "recast": {
+    "pairs": 2304,
+    "max_abs_err_m": 4.731730669504941e-07,
+    "mean_abs_err_m": 1.3884526650359301e-08,
+    "frac_gt_1mm": 0.0
+  }
+}

@@ -42,3 +42,9 @@ runs_v3/
 
 # scratch benchmarks
 _scratch_*
+
+# psen_v3 (spec V3) runs: checkpoints, per-run logs and the v3sdf distance-field
+# version are regenerable from the tracked code + config (data/ is ignored above);
+# the report figures under outputs_v3sdf/ are tracked.
+runs_v3sdf/
+logs_v3sdf*
