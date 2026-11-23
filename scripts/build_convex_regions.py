@@ -126,6 +126,9 @@ def main() -> int:
         t_region = (time.perf_counter() - t0) * 1e3
 
         rep = verify_polytopes(polys, dev_blocked, res)
+        # split the violations: only ellipses that are themselves obstacle free can be
+        # expected to sit inside an obstacle-free region
+        viol_feasible_safe = 0
         areas = [polytope_area(*polys.planes(i)) for i in range(len(cen))]
         # an ellipse that itself collides cannot be contained in an obstacle-free region
         occ_np = np.asarray(blocked).astype(np.uint8)
@@ -155,6 +158,13 @@ def main() -> int:
                                th[i:i + 1].to(device))[0]
             sup = ellipse_support(Q, polys.center[i], polys.A[i, :k])
             overrun = float((sup - polys.b[i, :k]).max())
+            single = type(polys)(A=polys.A[i:i + 1, :k].cpu(), b=polys.b[i:i + 1, :k].cpu(),
+                                n_planes=torch.tensor([k]), converged=torch.tensor([True]),
+                                n_rounds=torch.tensor([k]), center=polys.center[i:i + 1].cpu(),
+                                radius=polys.radius[i:i + 1].cpu(),
+                                feasible=polys.feasible[i:i + 1].cpu())
+            if verify_polytopes(single, dev_blocked.cpu(), res)["violating_regions"] > 0:
+                viol_feasible_safe += 1
             max_overrun = max(max_overrun, overrun)
             ell_inside &= overrun <= 2.0 * args.region_margin
 
@@ -177,6 +187,7 @@ def main() -> int:
             "area_mean_m2": float(np.mean(areas)) if areas else 0.0,
             "area_min_m2": float(np.min(areas)) if areas else 0.0,
             "violating_regions": rep["violating_regions"],
+            "violating_regions_feasible_safe": viol_feasible_safe,
             "ellipse_inside_when_safe": bool(ell_inside),
             "ellipse_overrun_max_m": round(max_overrun, 4),
             "n_checked_ellipses": int(n_checked),
@@ -223,6 +234,7 @@ def main() -> int:
         "ms_per_ellipse_batched": round(tot_region / max(tot_ellipses, 1), 3),
         "ms_per_trajectory_serial": (round(float(np.mean(serial_ms)), 2) if serial_ms else None),
         "violating_regions": int(sum(r["violating_regions"] for r in rows)),
+        "violating_regions_feasible_safe": int(sum(r["violating_regions_feasible_safe"] for r in rows)),
         "ellipse_inside_all_safe": all(r["ellipse_inside_when_safe"] for r in rows),
         "ellipse_overrun_max_m": round(max(r["ellipse_overrun_max_m"] for r in rows), 4),
         "ellipse_inside_tolerance": round(2 * args.region_margin, 4),

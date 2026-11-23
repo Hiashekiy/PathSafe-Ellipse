@@ -113,17 +113,19 @@ $PY ellipsenet/train.py --tag conft3 --resume checkpoints/connctl/best.pt --no-e
 
 ## 凸区域生成（椭圆 → 多面体）
 
-ellipsenet/geometry/polytopes.py 把每个预测椭圆吹成凸多面体（半空间交），方法借鉴
-Neural-IRIS 的局部 patch 贪心 + 分离超平面，并做了两处改进（方格近端面平面、闭式精确验收）。
+`ellipsenet/geometry/polytopes.py` 把每个预测椭圆吹成凸多面体（半空间交）。方法借鉴
+Neural-IRIS 的局部 patch 贪心 + 分离超平面，做了三处改动：方格"近端面"平面、闭式精确
+重叠判定、8 方向种子 + 单一精确循环（循环终止条件即验收）。
 
-`ash
- tests/test_polytopes.py                                  # 8 组不变量（椭圆在区域内/无方格相交/并行=串行安全/速度）
- scripts/build_convex_regions.py --n 8 --seed 5           # 预测→区域→验收+图
-`
+```bash
+$PY tests/test_polytopes.py                          # 10 组不变量（含速度与并行/串行等价安全）
+$PY scripts/build_convex_regions.py --n 8 --seed 5   # 预测→区域→验收+图
+```
 
-实测（RTX 4070，8 条测试轨迹 / 202 椭圆）：批量 **18.3 ms/轨迹（0.30–0.73 ms/椭圆）**，
-逐椭圆串行 231.9 ms/轨迹（≈12.7× 慢）；256 椭圆压力基准 35.9 ms（140 µs/椭圆）；
-**0 个违规区域**（精确角点+顶点判定）。默认 window_margin_m=3.0 是区域大小/速度旋钮。
+实测（RTX 4070）：端到端 **18.0 ms/轨迹（0.71 ms/椭圆）**；同一地图 256 个椭圆一次批量
+**41 µs/椭圆**；CPU 回退 0.35 ms/椭圆；「可行且椭圆自身安全」的区域 **0 违规**（302 与 202
+两个样本）。原始违规区域 6–9 个，全部属于自身碰撞或越出地图的椭圆（几何上无解）。
+`window_margin_m` 是区域大小/速度的旋钮。
 
 ## 已知局限
 

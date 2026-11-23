@@ -80,10 +80,14 @@ def main() -> int:
     a = torch.tensor([2.0])
     bb = torch.tensor([1.0])
     th = torch.tensor([0.0])
-    p = build_polytopes(c, a, bb, th, m, RES)
+    # empty sectors of the seeding step get a trivially satisfied face (n=0, b=BIG), so the
+    # plane count is a uniform 8 map/window + seed_directions; nothing else may bind
+    p = build_polytopes(c, a, bb, th, m, RES, seed_directions=8)
     hi_x, lo_x = float(p.b[0, 0]), float(-p.b[0, 1])
-    check("free space: only map + window faces are used", int(p.n_planes[0]) == 8,
+    check("free space: only map + window faces are used", int(p.n_planes[0]) == 16,
           f"n_planes {int(p.n_planes[0])}")
+    trivial = bool((p.A[0, 8:16].abs().sum(dim=-1) < 1e-9).all())
+    check("free space: all seeded faces are trivially satisfied", trivial)
     check("free space: region reaches the map border",
           abs(hi_x - ((m.shape[1] - 1) * RES - 0.02)) < 1e-4, f"x_max {hi_x:.3f}")
     check("free space: ellipse inside the region", check_ellipse_inside(p, a, bb, th))
