@@ -62,6 +62,34 @@ def filter_by_points(entries: List[Dict], indices: List[int], max_points: int) -
     return [i for i in indices if max_points <= 0 or int(entries[i]["n_points"]) <= max_points]
 
 
+def stratified_sample(entries: List[Dict], indices: List[int], n: int,
+                      seed: int) -> List[int]:
+    """Deterministic random subsample of the train split, stratified by ``map_group``.
+
+    Taking the first N indices would keep only the alphabetically first city; a
+    stratified draw keeps every held-in map group represented in proportion.
+    """
+    if n <= 0 or n >= len(indices):
+        return list(indices)
+    by_group: Dict[str, List[int]] = {}
+    for i in indices:
+        by_group.setdefault(str(entries[i]["map_group"]), []).append(i)
+    rng = np.random.default_rng(seed)
+    total = len(indices)
+    picked: List[int] = []
+    for g in sorted(by_group):
+        idxs = by_group[g]
+        take = max(1, int(round(n * len(idxs) / total)))
+        take = min(take, len(idxs))
+        picked.extend(int(idxs[j]) for j in rng.choice(len(idxs), size=take, replace=False))
+    if len(picked) > n:                       # trim the rounding excess deterministically
+        picked = [picked[j] for j in np.sort(rng.choice(len(picked), size=n,
+                                                        replace=False))]
+    print(f"stratified train sample: {len(picked)} trajectories from "
+          f"{len(by_group)} map groups (seed {seed})", flush=True)
+    return picked
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="")
@@ -73,6 +101,8 @@ def main() -> int:
     ap.add_argument("--overfit", type=int, default=0,
                     help="stage B: train on N short trajectories from the train split")
     ap.add_argument("--limit-train", type=int, default=0)
+    ap.add_argument("--sample-train", type=int, default=0,
+                    help="random (map_group stratified) subsample of the train split")
     ap.add_argument("--max-steps", type=int, default=0, help="cap steps per epoch")
     ap.add_argument("--val-limit", type=int, default=0)
     ap.add_argument("--exact-val-traj", type=int, default=192)
@@ -86,6 +116,10 @@ def main() -> int:
     ap.add_argument("--eval-overfit", action="store_true",
                     help="evaluate on the overfit trajectories instead of the val split")
     ap.add_argument("--resume", default="", help="checkpoint to continue from")
+    ap.add_argument("--patience", type=int, default=0,
+                    help="epochs without validation improvement before stopping (0 = off)")
+    ap.add_argument("--snapshot-every", type=int, default=0,
+                    help="save epoch{NNN}.pt every N epochs")
     args = ap.parse_args()
 
     cfg = load_config(args.config or None)
@@ -137,9 +171,11 @@ def main() -> int:
                                               replace=False)]
     if args.limit_train:
         tr_idx = tr_idx[: args.limit_train]
+    if args.sample_train:
+        tr_idx = stratified_sample(entries, tr_idx, args.sample_train, seed)
     print(f"trajectories {len(entries)} | train {len(tr_idx)} | val {len(va_idx)} | "
           f"test {len(te_idx)} | map groups "
-          f"{len({e['map_group'] for e in entries})}", flush=True)
+          f"{len({entries[i]['map_group'] for i in tr_idx})} in train", flush=True)
 
     device = torch.device(cfg["train"]["device"] if cfg["train"]["device"] != "auto"
                           else ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -199,6 +235,7 @@ def main() -> int:
     writer.writerow(LOG_COLUMNS)
 
     best = {"score": -1e9, "epoch": -1}
+    stopped_early = False
     step = start_epoch * steps_per_epoch          # keep the LR schedule continuous
     t0 = time.perf_counter()
     for epoch in range(start_epoch, epochs):
@@ -256,7 +293,7 @@ def main() -> int:
                 csv_file.flush()
             step += 1
 
-        if val_loader is not None:
+        if val_loader is not None and (epoch + 1) % max(int(cfg["train"]["eval_every"]), 1) == 0:
             metrics = run_evaluation(model, criterion, val_loader, device, cfg,
                                      exact=True,
                                      max_exact_traj=int(args.exact_val_traj), amp=amp)
@@ -281,11 +318,24 @@ def main() -> int:
                             "seed": seed},
                            os.path.join(out_dir, "best.pt"))
                 print(f"  -> new best (score {score:.4f}) saved", flush=True)
+            elif args.patience > 0 and epoch - best["epoch"] >= args.patience:
+                print(f"  !! early stop: no validation improvement for "
+                      f"{epoch - best['epoch']} epochs (best ep {best['epoch']}, "
+                      f"score {best['score']:.4f})", flush=True)
+                torch.save({"model": model.state_dict(), "cfg": cfg, "epoch": epoch,
+                            "step": step}, os.path.join(out_dir, "last.pt"))
+                stopped_early = True
+                break
 
         torch.save({"model": model.state_dict(), "cfg": cfg, "epoch": epoch, "step": step},
                    os.path.join(out_dir, "last.pt"))
+        if args.snapshot_every and (epoch + 1) % args.snapshot_every == 0:
+            torch.save({"model": model.state_dict(), "cfg": cfg, "epoch": epoch,
+                        "step": step},
+                       os.path.join(out_dir, f"epoch{epoch + 1:03d}.pt"))
     csv_file.close()
-    print(f"training done in {(time.perf_counter() - t0) / 60:.1f} min -> {out_dir}",
+    print(f"training done in {(time.perf_counter() - t0) / 60:.1f} min -> {out_dir}"
+          + (f" (early stop, best epoch {best['epoch']})" if stopped_early else ""),
           flush=True)
     return 0
 
