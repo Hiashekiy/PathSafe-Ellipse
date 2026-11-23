@@ -194,3 +194,28 @@ powershell -File scripts\launch_shards.ps1 -Shards 10 -PathsPerMap 30
 * `outputs/previews/`（29）、`outputs/ellipse_visualizations/`（21）、`outputs/path_visualizations/`（8）— 图
 * `outputs/checkpoints/ellipse_net_best.pt` — 最优模型
 
+---
+
+## 8. 方案 V3：网络结构重实现（`psen_v3/`）
+
+按 `PathSafe-EllipseNet_网络结构与训练实施方案.md` 重新实现的一套独立管道，
+与上面的 V2/V2.1 代码并存、互不影响：
+
+* 数据：在原始 V3 轨迹数据（`data/processed_v3/`，未改动）之上新建距离场数据版本
+  `data/processed_v3sdf/`（17 038 张唯一地图的米制有符号距离场 + 轨迹索引），
+  由 `scripts/v3_build_sdf.py` 生成；`scripts/v3_audit_dataset.py` 做全量数据审计。
+* 网络 `psen_v3/`：两个独立 ResUNet（256×256 全分辨率）+ 9 Token 占据查询（Flatten 前加相对位置）
+  + 每射线 3 点 Distance 采样 + 点内 16 射线 Self-Attention + `MLP([c_occ, Flatten(R̂)])`
+  + Path Self-Attention + Direction(16)/Ratio(1)/Shape(a,b,θ) 三头 + 16 个射线约束候选椭圆；
+  **不使用任何人工射线编号 / 中心偏移 / 偏移比例标签**，只做几何损失的概率期望训练。
+* 训练/评估/可视化：`psen_v3/train.py` / `evaluate.py` / `visualize.py`，
+  消融 `scripts/v3_ablate.py`。
+
+**测试集（`map_group` 完全 held-out，5 054 条轨迹 / 143 698 点）**：
+精确碰撞率 **12.95%**（安全率 0.8705）、SDF 采样安全率 0.9808、中心落在障碍格 2.1e-4、
+相邻中点连续性 0.967、整条走廊成功率 0.400。
+
+完整说明（数据审计、距离场约定、逐条结构对照、权重标定、阶段 A/B/C 结果、消融、局限）见
+**`docs/V3_网络与训练实施报告.md`**。
+
+
