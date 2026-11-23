@@ -271,7 +271,8 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
                     region_margin_m: float = 0.02, max_planes: int = 16,
                     window_margin_m: float = 3.0,
                     planes_per_iter: int = 1,
-                    seed_directions: int = 8) -> Polytopes:
+                    seed_directions: int = 8,
+                    refine: bool = True) -> Polytopes:
     """Inflate one convex region per predicted ellipse, all in parallel.
 
     ``centres (N,2)`` metres, ``a/b/theta (N,)``, ``blocked (H,W)`` 0/1 grid,
@@ -383,7 +384,7 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
     # The whole call is latency bound rather than compute bound (a 30-ellipse call and a
     # 256-ellipse call take the same wall time), so several faces are added per iteration:
     # fewer iterations is the only thing that actually matters here.
-    for _ in range(P):
+    for _ in range(P if refine else 0):
         bad = _overlap_mask(A, off, n_planes, cand, half) & cand_ok
         any_bad = bad.any(dim=1) & feasible & (n_planes < P)
         if not bool(any_bad.any()):
