@@ -271,7 +271,7 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
                     region_margin_m: float = 0.02, max_planes: int = 16,
                     window_margin_m: float = 3.0,
                     planes_per_iter: int = 1,
-                    seed_directions: int = 8,
+                    seed_directions: int = 0,
                     refine: bool = True) -> Polytopes:
     """Inflate one convex region per predicted ellipse, all in parallel.
 
@@ -347,6 +347,33 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
     ar = torch.arange(N, device=device)
     feasible = torch.ones((N,), dtype=torch.bool, device=device)
 
+    # ---- active set, maintained incrementally exactly like Neural-IRIS's C++ kernel
+    # (``cpp/src/geometry2d.cpp: build_safe_halfspaces`` -> ``next_active``): when a face is
+    # added it is scanned **once** over the obstacles that are still candidates, and the ones
+    # it excludes drop out for good.
+    #
+    # For a square we must be careful: "inside the region" means *one* of its four corners
+    # satisfies *every* face (a corner poking in is already a collision).  So per cell we
+    # carry ``slack`` of shape (N, M, 4): for each corner, the running maximum of
+    # ``n . corner - b`` over all faces added so far.  A cell has a corner inside the region
+    # iff ``min over corners of slack <= 0``, and a new face is folded in with one
+    # ``maximum`` - no re-testing of old faces, no (N,P,M) tensor.
+    def corner_slack(normal: torch.Tensor, offset: torch.Tensor) -> torch.Tensor:
+        """``(N,M,4)``: ``n . corner - b`` for the four corners of every candidate cell."""
+        base = (normal.unsqueeze(1) * cand).sum(-1) - offset[:, None]   # (N,M)
+        wx = half * normal[:, 0].abs()[:, None]                         # (N,1)
+        wy = half * normal[:, 1].abs()[:, None]
+        offs = torch.cat([wx + wy, wx - wy, -wx + wy, -wx - wy], dim=1)  # (N,4)
+        return base.unsqueeze(-1) + offs.unsqueeze(1)
+
+    slack = torch.full((N, cand.shape[1], 4), -float("inf"), dtype=dtype, device=device)
+    for k in range(8):
+        slack = torch.maximum(slack, corner_slack(A[:, k], off[:, k]))
+
+    def still_violating() -> torch.Tensor:
+        """``(N,M)``: the cell has one corner satisfying every face added so far."""
+        return slack.amin(dim=-1) <= 0.0
+
     # ---- seed: one face per angular sector, all sectors in a single step.
     # This is the batched version of the classic "N sectors -> N constraints" start-up: the
     # exact loop below then only has to close the corners between sectors (1-2 rounds
@@ -370,46 +397,49 @@ def build_polytopes(centres: torch.Tensor, a: torch.Tensor, b: torch.Tensor,
         normal = torch.einsum("nij,ndj->ndi", Q, obs - centres[:, None, :])
         normal = normal / normal.norm(dim=-1, keepdim=True).clamp_min(1e-9)
         offset = cell_face(normal, obs, half) - region_margin_m       # (N,D)
-        cuts = ellipse_support(Q.unsqueeze(1), centres.unsqueeze(1), normal) > (offset + 1e-6)
+        cuts = (ellipse_support(Q.unsqueeze(1), centres.unsqueeze(1), normal)
+                > (offset + region_margin_m + 1e-6))
         feasible = feasible & ~(has & cuts).any(dim=1)
         A[:, 8:8 + D] = torch.where(has[..., None], normal, torch.zeros_like(normal))
         off[:, 8:8 + D] = torch.where(has, offset, torch.full_like(offset, BIG))
         n_planes = torch.full((N,), 8 + D, dtype=torch.long, device=device)
+        for d in range(D):                                            # one pass per sector
+            upd = has[:, d]
+            if bool(upd.any()):
+                slack = torch.where(upd[:, None, None],
+                                    torch.maximum(slack, corner_slack(A[:, 8 + d],
+                                                                      off[:, 8 + d])),
+                                    slack)
 
-    # ---- single exact inflation loop.
-    # The overlap test below is the honest one (a square poking one corner into the region
-    # counts), so the loop *terminates only when the region is provably obstacle free* -
-    # that termination condition IS the verification; there is no separate check pass that
-    # could disagree with the construction.
-    # The whole call is latency bound rather than compute bound (a 30-ellipse call and a
-    # 256-ellipse call take the same wall time), so several faces are added per iteration:
-    # fewer iterations is the only thing that actually matters here.
+    # ---- inflation loop: add the face of the closest obstacle still inside, then drop every
+    # obstacle that face already excludes.  The active set is monotonically shrinking and
+    # empty means "no obstacle has a corner inside the region", i.e. it IS the verification.
     for _ in range(P if refine else 0):
-        bad = _overlap_mask(A, off, n_planes, cand, half) & cand_ok
-        any_bad = bad.any(dim=1) & feasible & (n_planes < P)
+        active = still_violating() & cand_ok
+        any_bad = active.any(dim=1) & feasible & (n_planes < P)
         if not bool(any_bad.any()):
             break
-        n_add = int(min(planes_per_iter, P))
-        vals, idxs = torch.topk(bad.float(), k=n_add, dim=1)          # metric-ordered
-        for j in range(n_add):
-            add = any_bad & ((n_planes + j) < P) & (vals[:, j] > 0.5)
-            if not bool(add.any()):
-                continue
-            obs = cand[ar, idxs[:, j]]                                # (N,2)
-            normal = torch.einsum("nij,nj->ni", Q, obs - centres)
-            normal = normal / normal.norm(dim=-1, keepdim=True).clamp_min(1e-9)
-            offset = cell_face(normal, obs, half) - region_margin_m
-            # a face that cuts the ellipse means this ellipse (or this margin) is
-            # infeasible: no obstacle-free region can contain it
-            cuts = ellipse_support(Q, centres, normal) > (offset + 1e-6)
-            feasible = feasible & ~(add & cuts)
-            slot = (n_planes + j).clamp_max(P - 1)
-            A[ar[add], slot[add]] = normal[add]
-            off[ar[add], slot[add]] = offset[add]
-            n_planes = n_planes + add.long()
+        idx = active.float().argmax(dim=1)                            # closest (metric order)
+        obs = cand[ar, idx]                                           # (N,2)
+        normal = torch.einsum("nij,nj->ni", Q, obs - centres)
+        normal = normal / normal.norm(dim=-1, keepdim=True).clamp_min(1e-9)
+        offset = cell_face(normal, obs, half) - region_margin_m
+        # a face that cuts the ellipse means this ellipse (or this margin) is infeasible:
+        # no obstacle-free region can contain it, so stop adding faces for it
+        # infeasible only if the face really cuts the ellipse: compare with the face *before*
+        # the region margin is subtracted, otherwise a merely grazing (but exactly safe)
+        # ellipse is abandoned and keeps leaving obstacle cells unhandled
+        cuts = ellipse_support(Q, centres, normal) > (offset + region_margin_m + 1e-6)
+        feasible = feasible & ~(any_bad & cuts)
+        slot = n_planes.clamp_max(P - 1)
+        A[ar[any_bad], slot[any_bad]] = normal[any_bad]
+        off[ar[any_bad], slot[any_bad]] = offset[any_bad]
+        n_planes = n_planes + any_bad.long()
+        slack = torch.where(any_bad[:, None, None],
+                            torch.maximum(slack, corner_slack(normal, offset)), slack)
 
-    still = (_overlap_mask(A, off, n_planes, cand, half) & cand_ok).any(dim=1)
-    converged = ~(still | _vertex_hits(A[:, :P], off, blocked, res))
+    converged = ~((still_violating() & cand_ok).any(dim=1)
+                  | _vertex_hits(A[:, :P], off, blocked, res))
 
     return Polytopes(A=A, b=off, n_planes=n_planes, converged=converged,
                      n_rounds=(n_planes - 8), center=centres,
@@ -489,6 +519,8 @@ def build_polytopes_serial(centres: np.ndarray, a: np.ndarray, b: np.ndarray,
                      center=torch.cat([p.center for p in parts]),
                      radius=torch.cat([p.radius for p in parts]),
                      feasible=torch.cat([p.feasible for p in parts]))
+
+
 
 
 
