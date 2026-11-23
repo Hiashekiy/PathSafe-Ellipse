@@ -1,18 +1,13 @@
 # ---------------------------------------------------------------------------
-# PathSafe-Ellipse
-# Only source, configs, docs, reports and figures are tracked.
-# Everything below is either user-provided input, a regenerable cache, or a
-# large binary that can be rebuilt from the tracked code + config.
+# PathSafe-EllipseNet (spec V3)
+# Tracked: the current implementation, its config/tests, docs, reports, figures,
+#          the delivered model checkpoint, and the logs of the runs that produced it.
+# Ignored: user-provided input maps, the datasets (hundreds of MB, regenerable from
+#          the tracked scripts + the original maps) and intermediate training runs.
 # ---------------------------------------------------------------------------
 
-# input maps + all generated data (processed caches, intermediate samples, splits)
+# input maps + all generated data (source trajectories, distance-field version, caches)
 data/
-
-# run logs (per-shard logs, profiling output, scratch scripts)
-logs/
-
-# duplicate model snapshots (best checkpoint is tracked, "last" is regenerable)
-outputs/checkpoints/ellipse_net_last*.pt
 
 # python
 __pycache__/
@@ -32,19 +27,15 @@ Desktop.ini
 # temporary
 *.tmp
 ~$*
-
-# V3 trajectory-level dataset: cached parsed maps, per-shard progress, run outputs
-logs_train_v3/
-data/cache_v3/
-
-# trained checkpoints (regenerable from the tracked code + config; ~5 MB each)
-runs_v3/
-
-# scratch benchmarks
 _scratch_*
 
-# psen_v3 (spec V3) runs: checkpoints, per-run logs and the v3sdf distance-field
-# version are regenerable from the tracked code + config (data/ is ignored above);
-# the report figures under outputs_v3sdf/ are tracked.
-runs_v3sdf/
-logs_v3sdf*
+# training runs: only the delivered model (conft3) is tracked
+runs_v3sdf/*
+!runs_v3sdf/conft3/
+!runs_v3sdf/conft3/**
+
+# ad-hoc console captures are not tracked (the three kept run logs are listed below)
+logs_v3sdf_*
+!logs_v3sdf_conft3.out
+!logs_v3sdf_connctl.out
+!logs_v3sdf_train10k_e100.out

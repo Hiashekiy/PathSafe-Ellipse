@@ -171,7 +171,7 @@ def recast_check(files: List[str], max_points: int = 6) -> Dict[str, float]:
     mismatch means the stored ranges and the map disagree (wrong convention, wrong
     unit or a stale file).  Only the first ``max_points`` query points are re-cast.
     """
-    from pathsafe_ellipse.v2.pipeline import _cast_one  # noqa: E402
+    from psen_v3.geometry.exact import supercover_ray_cast  # noqa: E402
 
     err = []
     for f in files:
@@ -185,7 +185,7 @@ def recast_check(files: List[str], max_points: int = 6) -> Dict[str, float]:
         angles = 2.0 * np.pi * np.arange(rays) / rays
         for i in range(min(p.shape[0], max_points)):
             for k in range(rays):
-                dc, _ = _cast_one(occ, p[i, 0] / res, p[i, 1] / res,
+                dc, _ = supercover_ray_cast(occ, p[i, 0] / res, p[i, 1] / res,
                                   float(np.cos(angles[k])), float(np.sin(angles[k])),
                                   max_range / res)
                 err.append(abs(min(dc * res, max_range) - lidar[i, k]))

@@ -85,7 +85,7 @@ def exact_trajectory(center: np.ndarray, a: np.ndarray, b: np.ndarray, theta: np
                      occupancy: np.ndarray, r_scene: float, rho_max: float = 0.85
                      ) -> Dict[str, object]:
     """Exact safety and continuity of one predicted trajectory (NumPy)."""
-    from pathsafe_ellipse.v2.ellipse import exact_clearance
+    from ..geometry.exact import exact_clearance
 
     n = len(center)
     S = ellipse_S(torch.from_numpy(a.astype(np.float64)),
