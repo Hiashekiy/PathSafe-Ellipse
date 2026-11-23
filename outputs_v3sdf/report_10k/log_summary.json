@@ -1,0 +1,54 @@
+{
+  "lr": {
+    "first": 2.666667e-08,
+    "last": 5.184567e-05
+  },
+  "tau": {
+    "first": 1.0,
+    "last": 0.8489
+  },
+  "total": {
+    "first": 3.452208,
+    "last": -5.762389
+  },
+  "choice": {
+    "first": 2.041587,
+    "last": -5.832528
+  },
+  "conn": {
+    "first": 141.062149,
+    "last": 7.01388
+  },
+  "raw_dist": {
+    "first": 2.83827,
+    "last": 3.207186
+  },
+  "raw_safe": {
+    "first": 5.413804,
+    "last": 49.673155
+  },
+  "raw_area": {
+    "first": -1.725837,
+    "last": -4.071854
+  },
+  "raw_conn": {
+    "first": 141.062149,
+    "last": 7.01388
+  },
+  "s_center_mean": {
+    "first": 3.060316,
+    "last": 3.707518
+  },
+  "area_mean": {
+    "first": 5.61764,
+    "last": 78.535328
+  },
+  "pi_entropy": {
+    "first": 2.603851,
+    "last": 0.069679
+  },
+  "pi_max": {
+    "first": 0.153453,
+    "last": 0.971621
+  }
+}

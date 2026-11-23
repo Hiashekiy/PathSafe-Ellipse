@@ -1,0 +1,46 @@
+[
+  {
+    "png": "pred_00_Moscow_0_256_part_0_0_c179_222_f48_k2_path_000.png",
+    "scene_id": "Moscow_0_256_part_0_0_c179_222_f48_k2",
+    "n_points": 11,
+    "exact_safe_rate": 1.0,
+    "boundary_cover_rate": 0.4421875,
+    "candidates_png": "candidates_00_Moscow_0_256_part_0_0_c179_222_f48_k2_path_000.png"
+  },
+  {
+    "png": "pred_01_Moscow_0_512_part_0_0_c141_32_f64_k2_path_000.png",
+    "scene_id": "Moscow_0_512_part_0_0_c141_32_f64_k2",
+    "n_points": 69,
+    "exact_safe_rate": 0.9855072463768116,
+    "boundary_cover_rate": 0.4538143382352941,
+    "candidates_png": "candidates_01_Moscow_0_512_part_0_0_c141_32_f64_k2_path_000.png"
+  },
+  {
+    "png": "pred_02_Shanghai_0_1024_part_0_0_c15_147_f80_k2_path_000.png",
+    "scene_id": "Shanghai_0_1024_part_0_0_c15_147_f80_k2",
+    "n_points": 21,
+    "exact_safe_rate": 1.0,
+    "boundary_cover_rate": 0.4421875
+  },
+  {
+    "png": "pred_03_Shanghai_0_1024_part_0_1_c7_1_f80_k1_path_001.png",
+    "scene_id": "Shanghai_0_1024_part_0_1_c7_1_f80_k1",
+    "n_points": 19,
+    "exact_safe_rate": 1.0,
+    "boundary_cover_rate": 0.46875
+  },
+  {
+    "png": "pred_04_Shanghai_0_256_part_0_0_c142_10_f48_k2_path_002.png",
+    "scene_id": "Shanghai_0_256_part_0_0_c142_10_f48_k2",
+    "n_points": 50,
+    "exact_safe_rate": 0.86,
+    "boundary_cover_rate": 0.44100765306122447
+  },
+  {
+    "png": "pred_05_Shanghai_0_256_part_0_0_c99_145_f48_k2_path_000.png",
+    "scene_id": "Shanghai_0_256_part_0_0_c99_145_f48_k2",
+    "n_points": 8,
+    "exact_safe_rate": 1.0,
+    "boundary_cover_rate": 0.46875
+  }
+]
