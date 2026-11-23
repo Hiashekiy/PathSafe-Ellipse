@@ -1,4 +1,4 @@
-﻿"""Visualise predictions of a ``psen_v3`` checkpoint (one figure per trajectory).
+"""Visualise predictions of a ``psen_v3`` checkpoint (one figure per trajectory).
 
     python psen_v3/visualize.py --checkpoint runs_v3sdf/full_s0/best.pt --n 6
 
@@ -34,14 +34,87 @@ def ellipse_xy(c, a, b, theta, n=96):
     return x, y
 
 
+def plot_candidates(item, out, prob, n, res, extent, occ, path,
+                    center, a, b, theta, tag, out_dir):
+    """Zoom on one path point: the 16 ray-constrained candidates and their weights.
+
+    Left: the 16 rays with their LiDAR ranges, the 16 candidate centres
+    ``q_ij = p_i + alpha_i * max(d_ij - m, 0) * u_ij`` and one ellipse per candidate
+    (opacity proportional to the direction probability).  Right: the chosen (argmax)
+    candidate alone, so the selected ellipse can be read without clutter.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    i = int(np.argmax(prob)) if prob.size else 0        # most confident point
+    p = path[i]
+    q = out["q"][0, i].cpu().numpy()                    # (16,2)
+    pi = out["pi"][0, i].cpu().numpy()
+    lidar = np.asarray(item["lidar"])[i]
+    max_range = float(item["max_range_m"])
+    jbest = int(np.argmax(pi))
+    span = float(max(lidar.max(), 3.0)) + 1.5
+    lo, hi = p - span, p + span
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6.4))
+    for ax, mode in zip(axes, ("all", "argmax")):
+        ax.imshow(1.0 - occ, cmap="gray", extent=extent, vmin=0, vmax=1)
+        ax.plot(path[:, 0], path[:, 1], "-o", color="tab:blue", ms=3, lw=1.1,
+                label="A* path", zorder=5)
+        ax.plot([p[0]], [p[1]], "s", color="k", ms=6, zorder=6, label="query point i")
+        if mode == "all":
+            for k in range(len(pi)):
+                ang = 2.0 * np.pi * k / 16.0
+                u = np.array([np.cos(ang), np.sin(ang)])
+                ax.plot([p[0], p[0] + lidar[k] * u[0]], [p[1], p[1] + lidar[k] * u[1]],
+                        "-", color="tab:red", lw=0.6, alpha=0.35)
+                ax.plot([q[k, 0]], [q[k, 1]], "o", color="tab:orange",
+                        ms=2.0 + 9.0 * float(pi[k]), zorder=7)
+                x, y = ellipse_xy(q[k], a[i], b[i], theta[i])
+                ax.plot(x, y, "-", color="tab:orange", lw=0.8,
+                        alpha=0.15 + 0.85 * float(pi[k]))
+            ax.set_title(f"16 candidates | alpha={float(out['alpha'][0, i]):.2f} | "
+                         f"a={a[i]:.2f} b={b[i]:.2f} m | "
+                         f"theta={np.degrees(theta[i]):.0f} deg")
+        else:
+            ang = 2.0 * np.pi * jbest / 16.0
+            u = np.array([np.cos(ang), np.sin(ang)])
+            ax.plot([p[0], p[0] + lidar[jbest] * u[0]], [p[1], p[1] + lidar[jbest] * u[1]],
+                    "-", color="tab:red", lw=1.2,
+                    label=f"ray {jbest} (d={lidar[jbest]:.2f} m)")
+            x, y = ellipse_xy(center[i], a[i], b[i], theta[i])
+            ax.plot(x, y, "-", color="tab:green", lw=1.8, label="selected ellipse")
+            ax.plot([center[i, 0]], [center[i, 1]], "o", color="tab:purple", ms=7,
+                    label="selected centre q_ij")
+            tag_hit = "hit" if lidar[jbest] < max_range - 1e-3 else "range-clipped"
+            ax.set_title(f"argmax ray {jbest}: pi = {pi[jbest]:.3f} ({tag_hit})")
+        ax.set_xlim(lo[0], hi[0])
+        ax.set_ylim(hi[1], lo[1])
+        ax.set_aspect("equal")
+        ax.legend(loc="upper right", fontsize=7)
+        ax.grid(alpha=0.2)
+    fig.suptitle(f"{item['scene_id']} path {item['path_id']} | point {i}/{n} | "
+                 f"res {res} m | zoom +-{span:.1f} m")
+    fig.tight_layout()
+    png = os.path.join(out_dir, f"candidates_{tag:02d}_{item['file'][:-4]}.png")
+    fig.savefig(png, dpi=110)
+    plt.close(fig)
+    return png
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", required=True)
     ap.add_argument("--split", default="test", choices=["train", "val", "test"])
     ap.add_argument("--n", type=int, default=6)
     ap.add_argument("--offset", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=-1,
+                    help=">=0: random sample of trajectories instead of the first N")
     ap.add_argument("--out-dir", default="outputs_v3sdf/viz")
     ap.add_argument("--device", default="")
+    ap.add_argument("--candidate-figs", type=int, default=2,
+                    help="emit a 16-candidate zoom figure for the first K trajectories")
     args = ap.parse_args()
 
     import matplotlib
@@ -59,7 +132,12 @@ def main() -> int:
                                 seed=int(cfg["data"]["split_seed"]))
     pick = {"train": tr, "val": va, "test": te}[args.split]
     pick = [i for i in pick if int(entries[i]["n_points"]) <= int(cfg["data"]["max_points"])]
-    pick = pick[args.offset: args.offset + args.n]
+    if args.seed >= 0:
+        rng = np.random.default_rng(args.seed)
+        pick = [pick[i] for i in sorted(rng.choice(len(pick), size=min(args.n, len(pick)),
+                                                  replace=False))]
+    else:
+        pick = pick[args.offset: args.offset + args.n]
 
     ds = TrajectoryDataset([entries[i] for i in pick], cfg["data"]["trajectory_dir"],
                            cfg["data"]["sdf_dir"], augment=False)
@@ -145,6 +223,12 @@ def main() -> int:
         axg.set_title(f"{os.path.basename(png)[:22]}\nsafe {safe_rate:.2f}", fontsize=7)
         axg.set_aspect("equal")
         axg.set_xticks([]); axg.set_yticks([])
+
+        if j < args.candidate_figs and n >= 2:
+            cand_png = plot_candidates(
+                item, out, prob, n, res, extent, occ, path,
+                center, a, b, theta, j, args.out_dir)
+            summary[-1]["candidates_png"] = os.path.basename(cand_png)
     grid.tight_layout()
     grid.savefig(os.path.join(args.out_dir, "overview.png"), dpi=120)
     with open(os.path.join(args.out_dir, "summary.json"), "w", encoding="utf-8") as fh:
@@ -156,4 +240,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
