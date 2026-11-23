@@ -1,0 +1,87 @@
+# ---------------------------------------------------------------------------
+# ellipsenet config - "PathSafe-EllipseNet 网络结构与训练实施方案" (spec V3).
+# Weights are a measured starting point, not validated optima: raw loss magnitudes
+# are logged (loss.raw_*) and `loss.scales` divides them (spec section 10.7).
+# ---------------------------------------------------------------------------
+data:
+  trajectory_dir: ./data/trajectories
+  sdf_dir: ./data/distance_fields          # signed-distance data version (Task 2)
+  lidar_rays: 16
+  d_clip: 8.0                              # SDF input clip / normaliser [m], fixed
+  split_frac: [0.8, 0.1, 0.1]              # by map_group, never by point
+  split_seed: 0
+  max_per_scene: 4                         # scene-grouped batches (map reuse)
+  map_cache: 96                            # in-process LRU of decoded maps
+  max_points: 256                          # memory guard: N above this is skipped
+
+label:
+  rho_max: 0.85                            # generator continuity threshold (metric only)
+
+model:
+  ch: 128                                  # feature width C
+  resunet_base: 24                         # channels at 256x256
+  resunet_depths: [1, 1, 1, 1]
+  norm: group
+  mlp_hidden: 256
+  dropout: 0.0
+  attn_heads: 4
+  attn_dropout: 0.0
+  ff_mult: 2
+  ray_attn_layers: 2
+  path_attn_layers: 2
+  occ_token_spacing_m: 0.5                 # physical 3x3 spacing, resolution independent
+  occ_pos_encoding_norm_m: 0.5
+  ray_sample_lambdas: [0.25, 0.5, 0.75]
+  candidate_ray_margin_m: 0.01             # numeric margin only: `blocked` already
+                                           # includes robot radius + safety margin
+  shape_a_min_m: 0.15
+  shape_a_max_m: 6.0                       # = generator r_axis_max_m
+  shape_b_min_m: 0.05
+  ellipse_samples_radii: [0.0, 0.5, 0.8, 0.95, 1.0]   # calibrated: dense enough at the
+  ellipse_samples_counts: [1, 6, 10, 16, 24]          # boundary for the exact test
+  conn_boundary_samples: 8
+  ablate:                                  # spec section 14 ablations, default off
+    occ_point: false
+    ray_attn: false
+    path_attn: false
+    occ_pos_encoding: false
+
+loss:
+  w_dist: 1.0
+  w_safe: 5.0
+  w_area: 0.05
+  w_conn: 1.0
+  w_span: 0.0                              # arc-gap (midpoint) coverage; measured to
+                                           # fight the safety term, so off by default
+  w_smooth: 0.5                            # adjacent-station offset coherence (measured:
+                                           # continuity 0.959 -> 0.992 at -1.8 pts safety)
+  span_rho_target: 0.85                    # = the generator's continuity threshold
+  d_max_m: 8.0                             # spec 10.1 D_max
+  d_margin_m: 0.06                         # extra numeric margin, NOT the robot radius
+  area_eps: 1.0e-6
+  scales:                                  # calibrated from the measured raw magnitudes
+    dist: 1.0                              #   (stage-B overfit runs, see the report)
+    safe: 0.05                             # raw safety penalties are O(1e-2) at init
+    area: 1.0
+    conn: 100.0                            # raw conn magnitudes are O(1e2) at init
+    span: 1.0                              # raw span magnitudes are O(1)
+    smooth: 1.0                            # raw offset-smoothness is O(1)
+
+train:
+  batch_size: 4
+  epochs: 3
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  warmup_frac: 0.03
+  grad_clip: 1.0
+  amp: true
+  tau_start: 1.0
+  tau_end: 0.7
+  seeds: [0]
+  eval_every: 1
+  val_limit: 512
+  log_every: 50
+  max_steps_per_epoch: 0                   # 0 = the whole epoch
+  augment: true
+  out_dir: ./checkpoints
+  device: auto

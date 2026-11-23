@@ -6,9 +6,9 @@
 
 - 训练损失只有几何项：中心净空、椭圆安全、面积、相邻椭圆连接、相邻偏移连贯 ——
   **不使用** GT 中心 / 半轴 / 朝向 / 射线编号标签。
-- 当前模型：`runs_v3sdf/conft3/best.pt`（5.04 M 参数）。
+- 当前模型：`checkpoints/v3_best.pt`（5.04 M 参数）。
 - 实施依据：`PathSafe-EllipseNet_网络结构与训练实施方案.md`；完整交付报告见
-  **[`docs/V3_网络与训练实施报告.md`](docs/V3_网络与训练实施报告.md)**。
+  **[`docs/report.md`](docs/report.md)**。
 
 ## 当前结果（`map_group` 完全 held-out 的测试集：5 054 条轨迹 / 143 698 点）
 
@@ -21,32 +21,39 @@
 | 越出地图边界比例 | 0.85% |
 | 单条轨迹推理耗时（batch 1，RTX 4070） | **10.9 ms**（模型 8.4 ms；同场景复用地图特征 2.8 ms） |
 
-定性与定量对比：`outputs_v3sdf/viz_test_cont/`（6 条预测/GT 对照 + 16 候选放大）、
-`outputs_v3sdf/grid_test_cont/`（24 条轨迹网格，含纯白底版）、`outputs_v3sdf/report/`（损失曲线与指标表）。
+定性与定量对比：`results/figures/predictions/`（6 条预测/GT 对照 + 16 候选放大）、
+`results/figures/grid/`（24 条轨迹网格，含纯白底版）、`results/figures/curves/`（损失曲线与指标表）。
 
 ## 目录
 
 ```text
-psen_v3/                当前实现（唯一代码来源）
-├── configs/v3.yaml     全部超参（含标定后的 loss.scales、消融开关）
-├── models/             resunet.py（两个独立 ResUNet）、psenet.py（主网络）
-├── geometry/           sampling.py（坐标查询/可微 SDF/椭圆采样）、candidates、losses.py、
-│                       exact.py（精确椭圆-栅格判定，vendored，无外部依赖）
-├── data/               sdf.py（距离场定义）、dataset.py（轨迹级数据集/划分/翻转增强）
-├── evaluation/         metrics.py（精确+张量指标）、runner.py
-├── tests/              test_sdf / test_alignment / test_candidates / test_losses（阶段 A）
-└── train.py·evaluate.py·visualize.py·visualize_grid.py
-scripts/v3_*.py         数据审计、SDF 构建、数据契约检查、消融、报告图、推理/ResUNet 基准
+configs/v3.yaml            全部超参（含标定后的 loss.scales、消融开关）
+ellipsenet/                当前实现（唯一代码来源）
+├── models/                resunet.py（两个独立 ResUNet）、psenet.py（主网络）
+├── geometry/              sampling.py（坐标查询/可微 SDF/椭圆采样）、losses.py、
+│                          exact.py（精确椭圆-栅格判定，自带，无外部依赖）
+├── data/                  sdf.py（距离场定义）、dataset.py（轨迹级数据集/划分/翻转增强）
+├── evaluation/            metrics.py（精确+张量指标）、runner.py
+└── train.py · evaluate.py · visualize.py · visualize_grid.py · config.py
+tests/                     阶段 A 测试：test_sdf / test_alignment / test_candidates / test_losses
+scripts/                   8 个独立脚本（见下）
 data/
-├── street-map/         原始 MovingAI 地图（用户输入，只读）
-├── processed_v3/       轨迹级 V3 数据集（50 648 条轨迹，训练/验收的输入）
-└── processed_v3sdf/    距离场数据版本（17 038 张唯一地图的米制有符号距离场 + index.jsonl）
-runs_v3sdf/conft3/      当前模型 best.pt + 配置/指标/日志
-docs/                   实施报告
-outputs_v3/audit_v3/    20 张数据审计样本图
-outputs_v3sdf/          预测网格、预测/GT 对照、损失曲线与指标表
-reports_v3/             审计、消融、GT 连续性基准、数据契约、推理时延
+├── maps/                  原始 MovingAI 地图（用户输入，只读）
+├── trajectories/          轨迹级数据集（50 648 条轨迹，训练/验收的输入）
+└── distance_fields/       距离场数据版本（17 038 张唯一地图 + index.jsonl + manifest.json）
+checkpoints/v3_best.pt     交付模型（另含 v3_config.json / v3_train_log.csv / v3_run_meta.json）
+results/
+├── metrics/               验收指标、审计、消融、GT 基准、数据契约、推理时延（json/md）
+├── figures/               预测图（predictions/）、24 条网格（grid/）、审计样本（audit/）、
+│                          损失曲线与指标表（curves/）
+└── logs/                  三个保留下来的训练控制台日志
+docs/report.md             实施报告（结构对照、标定过程、全部数字与复现命令）
 ```
+
+`scripts/` 一览：`audit_dataset.py`（数据审计）、`build_distance_fields.py`（距离场数据版本）、
+`check_data_contract.py`（字段/单位契约）、`run_ablation.py`（8 项消融）、
+`make_report_figures.py`（损失曲线与指标表）、`measure_gt_continuity.py`（标注椭圆连续性基准）、
+`bench_inference.py`（单条推理时延）、`bench_resunet.py`（ResUNet 阶段级剖析）。
 
 ## 环境
 
@@ -59,30 +66,30 @@ scipy 1.15.3、matplotlib 3.10.7、pyyaml），RTX 4070 12 GB。见 `requirement
 PY=E:/CondaEnvData/envs/GGMPC/python.exe
 
 # 阶段 A 测试（几何算子）
-$PY psen_v3/tests/test_sdf.py
-$PY psen_v3/tests/test_alignment.py
-$PY psen_v3/tests/test_candidates.py
-$PY psen_v3/tests/test_losses.py
+$PY tests/test_sdf.py
+$PY tests/test_alignment.py
+$PY tests/test_candidates.py
+$PY tests/test_losses.py
 
 # 验收（held-out）
-$PY psen_v3/evaluate.py --checkpoint runs_v3sdf/conft3/best.pt --split test
+$PY ellipsenet/evaluate.py --checkpoint checkpoints/v3_best.pt --split test
 
 # 可视化
-$PY psen_v3/visualize.py --checkpoint runs_v3sdf/conft3/best.pt --split test --n 6 \
-    --seed 7 --candidate-figs 2 --out-dir outputs_v3sdf/viz_test_cont
-$PY psen_v3/visualize_grid.py --checkpoint runs_v3sdf/conft3/best.pt --split test \
-    --n 24 --seed 11 --cols 6 --plain --no-titles --big 3 --out-dir outputs_v3sdf/grid_test_cont
+$PY ellipsenet/visualize.py --checkpoint checkpoints/v3_best.pt --split test --n 6 \
+    --seed 7 --candidate-figs 2 --out-dir results/figures/predictions
+$PY ellipsenet/visualize_grid.py --checkpoint checkpoints/v3_best.pt --split test \
+    --n 24 --seed 11 --cols 6 --plain --no-titles --big 3 --out-dir results/figures/grid
 
 # 推理时延基准（batch 1）
-$PY scripts/v3_bench_inference.py --checkpoint runs_v3sdf/conft3/best.pt --iters 50
+$PY scripts/bench_inference.py --checkpoint checkpoints/v3_best.pt --iters 50
 
 # 从头重建：距离场数据版本 → 训练 → 连续性微调（详见报告 13 节）
-$PY scripts/v3_build_sdf.py --workers 12 --verify 40
-$PY psen_v3/train.py --tag train10k_e100 --sample-train 10000 --epochs 100 --batch-size 8 \
+$PY scripts/build_distance_fields.py --workers 12 --verify 40
+$PY ellipsenet/train.py --tag train10k_e100 --sample-train 10000 --epochs 100 --batch-size 8 \
     --patience 25 --snapshot-every 10 --set train__eval_every=2
-$PY psen_v3/train.py --tag connctl --resume runs_v3sdf/train10k_e100/best.pt --no-epoch-carry \
+$PY ellipsenet/train.py --tag connctl --resume checkpoints/train10k_e100/best.pt --no-epoch-carry \
     --sample-train 10000 --epochs 4 --batch-size 8 --lr 4e-5 --set loss__w_span=0.0
-$PY psen_v3/train.py --tag conft3 --resume runs_v3sdf/connctl/best.pt --no-epoch-carry \
+$PY ellipsenet/train.py --tag conft3 --resume checkpoints/connctl/best.pt --no-epoch-carry \
     --sample-train 10000 --epochs 3 --batch-size 8 --lr 1e-5 --set loss__w_smooth=0.5
 ```
 
@@ -114,6 +121,6 @@ $PY psen_v3/train.py --tag conft3 --resume runs_v3sdf/connctl/best.pt --no-epoch
 
 ## 版本
 
-- 数据版本：`data/processed_v3`（label_version v3）+ `data/processed_v3sdf`（sdf_version v3sdf-1）
-- 模型：`runs_v3sdf/conft3/best.pt`（从 `train10k_e100` → `connctl` → `conft3` 逐级微调而来）
+- 数据版本：`data/trajectories`（label_version v3）+ `data/distance_fields`（sdf_version v3sdf-1）
+- 模型：`checkpoints/v3_best.pt`（从 `train10k_e100` → `connctl` → `conft3` 逐级微调而来）
 - git 历史保留全部开发提交；工作区只保留本版代码、模型与必要数据。

@@ -1,12 +1,11 @@
 # ---------------------------------------------------------------------------
 # PathSafe-EllipseNet (spec V3)
-# Tracked: the current implementation, its config/tests, docs, reports, figures,
-#          the delivered model checkpoint, and the logs of the runs that produced it.
-# Ignored: user-provided input maps, the datasets (hundreds of MB, regenerable from
-#          the tracked scripts + the original maps) and intermediate training runs.
+# Tracked: implementation, config, tests, docs, figures/metrics, the delivered model
+#          checkpoint and the logs of the runs that produced it.
+# Ignored: user-provided maps, the datasets (regenerable from the tracked scripts)
+#          and any additional training run.
 # ---------------------------------------------------------------------------
 
-# input maps + all generated data (source trajectories, distance-field version, caches)
 data/
 
 # python
@@ -29,15 +28,9 @@ Desktop.ini
 ~$*
 _scratch_*
 
-# training runs: only the delivered model (conft3) is tracked
-runs_v3sdf/*
-!runs_v3sdf/conft3/
-!runs_v3sdf/conft3/**
-# ... and inside it, "last" is a duplicate of the best checkpoint
-runs_v3sdf/conft3/last.pt
-
-# ad-hoc console captures are not tracked (the three kept run logs are listed below)
-logs_v3sdf_*
-!logs_v3sdf_conft3.out
-!logs_v3sdf_connctl.out
-!logs_v3sdf_train10k_e100.out
+# only the delivered checkpoint is tracked; further runs stay local
+checkpoints/*
+!checkpoints/v3_best.pt
+!checkpoints/v3_config.json
+!checkpoints/v3_run_meta.json
+!checkpoints/v3_train_log.csv

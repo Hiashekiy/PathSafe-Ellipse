@@ -114,7 +114,7 @@ PathSafe-Ellipse/
         └── ...
 ```
 
-实现时递归搜索 `data/street-map/` 下所有 `.map`
+实现时递归搜索 `data/maps/` 下所有 `.map`
 文件，不要只读取根目录第一层，也不要根据文件名推断地图尺寸。地图尺寸必须从
 `.map` 文件头解析。
 
@@ -1073,7 +1073,7 @@ test：10%
 
   参数                                          初始值 说明
   --------------------------- ------------------------ ------------------------
-  `map_dir`                        `./data/street-map` 原始地图目录
+  `map_dir`                        `./data/maps` 原始地图目录
   `resolution`                             0.25 m/cell 地图分辨率
   `robot_radius`                                0.25 m 机器人等效半径
   `inflation_kernel`                               3×3 方形结构元素
